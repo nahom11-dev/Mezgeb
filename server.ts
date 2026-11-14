@@ -3,6 +3,7 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
+import crypto from "crypto";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 
 dotenv.config();
@@ -88,14 +89,89 @@ app.get("/api/capabilities", (_req, res) => {
   });
 });
 
-// Simulated outbox submission endpoint for offline queue flush
-app.post("/api/registrations/outbox", (req, res) => {
-  const { id, profile } = req.body ?? {};
-  if (!profile || typeof profile !== "object") {
-    return res.status(400).json({ error: "Missing registration profile" });
-  }
-  const token = `mzg_tok_${Math.random().toString(16).slice(2, 10)}`;
-  res.json({ ok: true, outboxId: id ?? null, token, profile });
+// ---------------------------------------------------------------------------
+// Platform handoff (Level 1): the widget stores the confirmed profile here and gets a one-time token.
+// The page gives the token to its own server, which swaps it + its secret key for the profile.
+// Single use, expires after MEZGEB_TOKEN_TTL_MS (default 5 minutes). In-memory: one server process.
+// ---------------------------------------------------------------------------
+const TOKEN_TTL_MS = Number(process.env.MEZGEB_TOKEN_TTL_MS) || 5 * 60_000;
+const DEMO_SITE_KEY = "pk_demo_mezgeb"; // Mezgeb's own /demo page
+const DEMO_SECRET = process.env.MEZGEB_DEMO_SECRET || crypto.randomBytes(24).toString("base64url");
+
+/** MEZGEB_SITE_KEYS="pk_test_savanna:sk_test_…,pk_live_x:sk_live_…" (publishable:secret pairs) */
+const SITE_KEYS = new Map<string, string>([[DEMO_SITE_KEY, DEMO_SECRET]]);
+for (const pair of (process.env.MEZGEB_SITE_KEYS ?? "").split(",")) {
+  const [pk, sk] = pair.split(":").map((s) => s?.trim());
+  if (pk && sk) SITE_KEYS.set(pk, sk);
+}
+
+type Registration = { siteKey: string; profile: Record<string, unknown>; createdAt: number; expiresAt: number };
+const registrations = new Map<string, Registration>();
+
+function sweepRegistrations() {
+  // Keep expired entries 10 more minutes so a late exchange gets "expired" (410), not "unknown" (404).
+  const cutoff = Date.now() - 10 * 60_000;
+  for (const [token, reg] of registrations) if (reg.expiresAt < cutoff) registrations.delete(token);
+}
+
+function secretsMatch(given: string, expected: string): boolean {
+  const a = crypto.createHash("sha256").update(given).digest();
+  const b = crypto.createHash("sha256").update(expected).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+function createRegistration(siteKey: unknown, profile: unknown): { token: string; expiresAt: number } | { error: string; status: number } {
+  if (typeof siteKey !== "string" || !SITE_KEYS.has(siteKey)) return { error: "Unknown site key", status: 400 };
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return { error: "Missing registration profile", status: 400 };
+  sweepRegistrations();
+  const token = `mzg_tok_${crypto.randomBytes(24).toString("base64url")}`;
+  const now = Date.now();
+  registrations.set(token, { siteKey, profile: profile as Record<string, unknown>, createdAt: now, expiresAt: now + TOKEN_TTL_MS });
+  return { token, expiresAt: now + TOKEN_TTL_MS };
+}
+
+type ExchangeResult = { status: number; body: Record<string, unknown> };
+function exchangeToken(token: unknown, secret: string): ExchangeResult {
+  if (!secret) return { status: 401, body: { error: "Missing secret key (Authorization: Bearer sk_…)" } };
+  if (typeof token !== "string" || !token) return { status: 400, body: { error: "Missing token" } };
+  sweepRegistrations();
+  const reg = registrations.get(token);
+  if (!reg) return { status: 404, body: { error: "Unknown or already used token" } };
+  if (!secretsMatch(secret, SITE_KEYS.get(reg.siteKey) ?? "")) return { status: 401, body: { error: "Wrong secret key" } };
+  registrations.delete(token); // single use, also when expired
+  if (Date.now() > reg.expiresAt) return { status: 410, body: { error: "Token expired" } };
+  return { status: 200, body: { profile: reg.profile, siteKey: reg.siteKey, createdAt: new Date(reg.createdAt).toISOString() } };
+}
+
+// Widget → Mezgeb: store the confirmed profile, get a one-time token (never the profile back).
+app.post("/v1/registrations", aiRateLimit, (req, res) => {
+  const out = createRegistration(req.body?.siteKey, req.body?.profile);
+  if ("error" in out) return res.status(out.status).json({ error: out.error });
+  res.status(201).json(out);
+});
+
+// Offline outbox flush: same as above, keeps the outbox id.
+app.post("/api/registrations/outbox", aiRateLimit, (req, res) => {
+  const { id, profile, siteKey } = req.body ?? {};
+  const out = createRegistration(siteKey ?? DEMO_SITE_KEY, profile);
+  if ("error" in out) return res.status(out.status).json({ error: out.error });
+  res.json({ ok: true, outboxId: id ?? null, ...out });
+});
+
+// Platform server → Mezgeb: swap token + secret key for the confirmed profile. Server-to-server only.
+app.post("/v1/registrations/exchange", (req, res) => {
+  const auth = String(req.headers.authorization ?? "");
+  const secret = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  const out = exchangeToken(req.body?.token, secret);
+  res.status(out.status).json(out.body);
+});
+
+// Mezgeb's own /demo page: shows a real exchange using a server-side demo key (never sent to the browser).
+app.post("/api/demo/exchange", (req, res) => {
+  const reg = registrations.get(String(req.body?.token ?? ""));
+  if (reg && reg.siteKey !== DEMO_SITE_KEY) return res.status(403).json({ error: "Not a demo token" });
+  const out = exchangeToken(req.body?.token, DEMO_SECRET);
+  res.status(out.status).json(out.body);
 });
 
 // a) Voice answers transcription + field extraction + optional choice matching
