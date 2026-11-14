@@ -60,7 +60,8 @@ const DOC_PAGES: DocPageData[] = [
   },
   body: JSON.stringify({ token }),
 });
-const profile = await res.json();`,
+// 200 { profile, siteKey, createdAt } · 401 wrong key · 404 used/unknown · 410 expired
+const { profile } = await res.json();`,
         },
       },
       {
@@ -237,7 +238,7 @@ docker compose --profile full up -d`,
   {
     slug: "api",
     title: "REST API",
-    summary: "Core endpoints, authentication with publishable vs secret keys, and webhook events.",
+    summary: "Core endpoints and authentication with publishable vs secret keys. Full spec: /openapi.yaml.",
     sections: [
       {
         id: "auth",
@@ -250,8 +251,11 @@ docker compose --profile full up -d`,
         id: "endpoints",
         heading: "Endpoints",
         body: [
+          "GET /v1/mezgeb.js — the <mezgeb-register> web component.",
+          "POST /v1/registrations — the widget stores the confirmed profile and receives a one-time token (5 minutes, single use).",
+          "POST /v1/registrations/exchange — your server swaps the token plus its secret key for the confirmed profile.",
           "GET /api/capabilities — check whether voice transcription, Smart Help, Skills AI, and Simplify AI are available on the running server.",
-          "POST /v1/registrations/exchange — exchange a one-time registration token for the confirmed profile.",
+          "GET /openapi.yaml — the full OpenAPI 3.1 description.",
           "POST /api/registrations/outbox — flush queued offline registrations upon reconnection.",
           "POST /api/ai/voice — transcribe short <=1 MB audio clips (or match choice options), discarding audio immediately after.",
           "POST /api/ai/simplify — rewrite a question in simpler wording (falls back to the template hint).",
@@ -259,13 +263,16 @@ docker compose --profile full up -d`,
         code: {
           title: "POST /v1/registrations/exchange",
           content: `{
-  "id": "usr_8912a",
-  "name": "Hana",
-  "area": "Lideta",
-  "id_route": "partner_pending",
-  "partner_org": "Addis Accessibility Centre (sample)",
-  "skills": ["Sales", "Bookkeeping"],
-  "support_shared": false
+  "profile": {
+    "name": "Hana",
+    "area": "Lideta",
+    "id_route": "partner_pending",
+    "partner_org": "addis_accessibility",
+    "skills": ["Sales", "Bookkeeping"],
+    "support_shared": false
+  },
+  "siteKey": "pk_learnhub",
+  "createdAt": "2026-11-15T09:30:00.000Z"
 }`,
         },
       },

@@ -75,6 +75,11 @@ function getAiClient(): GoogleGenAI | null {
   });
 }
 
+// Level 2: OpenAPI description of the endpoints below
+app.get("/openapi.yaml", (_req, res) => {
+  res.type("application/yaml").sendFile(path.resolve("openapi.yaml"));
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, aiConfigured: Boolean(process.env.GEMINI_API_KEY) });
 });

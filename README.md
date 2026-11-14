@@ -23,6 +23,34 @@ Needs Node.js 20 or newer and git.
    npm test
    ```
 
+## Add Mezgeb to your site (Level 1)
+
+1. Build the web component and start the server (it serves `/v1/mezgeb.js` and the API):
+   ```bash
+   npm run build:embed
+   npm run dev
+   ```
+2. In `.env`, register your site and allow its origin:
+   ```bash
+   MEZGEB_SITE_KEYS="pk_test_mysite:sk_test_change_me"
+   MEZGEB_ALLOWED_ORIGINS="http://localhost:8080"
+   ```
+3. Put two lines on your sign-up page:
+   ```html
+   <script type="module" src="http://localhost:3000/v1/mezgeb.js"></script>
+   <mezgeb-register site-key="pk_test_mysite" lang="am" platform-name="My site"></mezgeb-register>
+   ```
+4. Listen for `mezgeb:complete` (its `detail.token` is a one-time token, never the profile), send the token to
+   your server, and exchange it there:
+   ```bash
+   curl -X POST http://localhost:3000/v1/registrations/exchange \
+     -H "Authorization: Bearer sk_test_change_me" -H "Content-Type: application/json" \
+     -d '{"token":"mzg_tok_…"}'
+   ```
+   The token works once and expires after 5 minutes. Full API: `/openapi.yaml` (Level 2).
+
+The widget renders in a shadow root, so your CSS and Mezgeb's never mix.
+
 ## Pages in this showcase
 
 - `/` — Product landing page, origin story, feature showcase, integration overview, and FAQ
@@ -37,8 +65,8 @@ Needs Node.js 20 or newer and git.
 
 ## What is simulated vs real
 
-- **Simulated:** SMS "finish later" delivery, the Partner Console (`/partner` synced across tabs via `BroadcastChannel`), the platform token exchange simulation, and the sample job listings on `/jobs` (`Learnhub` and `Hana` are sample names).
-- **Real:** Accessible one-question-per-screen flow, JDN Ethiopian/Gregorian calendar conversion, WCAG contrast checker, Service Worker + IndexedDB offline outbox, and server-side Gemini API calls (when `GEMINI_API_KEY` is configured).
+- **Simulated:** SMS "finish later" delivery (the resume link works on the same device only), the Partner Console (`/partner` synced across tabs via `BroadcastChannel`, so only in the same browser), and the sample job listings on `/jobs` (`Learnhub` and `Hana` are sample names).
+- **Real:** The `<mezgeb-register>` embed and the one-time token exchange (tokens are kept in memory, so one server process), accessible one-question-per-screen flow, JDN Ethiopian/Gregorian calendar conversion, WCAG contrast checker, Service Worker + IndexedDB offline outbox, and server-side Gemini API calls (when `GEMINI_API_KEY` is configured).
 
 ## The three demo moments
 
