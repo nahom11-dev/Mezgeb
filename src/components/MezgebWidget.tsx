@@ -1278,7 +1278,10 @@ export function MezgebWidget({
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={() => setResumePromptStep(null)}
+              onClick={() => {
+                setStepIndex(Math.min(Math.max(resumePromptStep - 1, 0), totalSteps - 1));
+                setResumePromptStep(null);
+              }}
               className="px-3 min-h-[38px] rounded-lg bg-[#1F5C46] text-white text-xs font-semibold"
             >
               {t("widgetResumeBtn", { step: resumePromptStep })}
