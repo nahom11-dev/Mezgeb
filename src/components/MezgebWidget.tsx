@@ -1180,6 +1180,14 @@ export function MezgebWidget({
   const currentErrorMap = new Map(errors.map((e) => [e.fieldId, e.message]));
   const hintDomId = currentQuestion?.hint?.[lang] ? `${getFieldDomId(currentQuestion.id)}-hint` : undefined;
   /** aria-describedby for a field: the question hint (always) plus its error message (when shown). */
+  /** WCAG 1.3.5: tell browsers/assistive tech what personal data a field holds. */
+  const autoCompleteFor = (q: TemplateQuestion): string | undefined => {
+    const key = String(q.maps_to ?? q.id).toLowerCase();
+    if (q.type === "email" || key === "email") return "email";
+    if (q.type === "phone" || key === "phone") return "tel";
+    if (key === "name" || key === "full_name") return "name";
+    return undefined;
+  };
   const describedBy = (fieldKey: string): string | undefined => {
     const ids = [hintDomId, currentErrorMap.has(getFieldDomId(fieldKey)) ? `${getFieldDomId(fieldKey)}-err` : undefined].filter(Boolean);
     return ids.length ? ids.join(" ") : undefined;
@@ -1722,6 +1730,7 @@ export function MezgebWidget({
                 }}
                 id={getFieldDomId(currentQuestion.id)}
                 type="text"
+                autoComplete={autoCompleteFor(currentQuestion)}
                 disabled={readOnly}
                 placeholder={currentQuestion.placeholder?.[lang] || ""}
                 value={String(answers[currentQuestion.id] ?? "")}
@@ -1750,6 +1759,7 @@ export function MezgebWidget({
                 }}
                 id={getFieldDomId(currentQuestion.id)}
                 type="email"
+                autoComplete={autoCompleteFor(currentQuestion)}
                 disabled={readOnly}
                 placeholder={currentQuestion.placeholder?.[lang] || "name@example.com"}
                 value={String(answers[currentQuestion.id] ?? "")}
@@ -1904,6 +1914,7 @@ export function MezgebWidget({
                 }}
                 id={getFieldDomId(currentQuestion.id)}
                 type="tel"
+                autoComplete="tel"
                 inputMode="numeric"
                 disabled={readOnly}
                 placeholder={currentQuestion.placeholder?.[lang] || "091 234 5678"}
@@ -2035,6 +2046,7 @@ export function MezgebWidget({
                       </label>
                       <input
                         id={getFieldDomId("dob_greg_day")}
+                        autoComplete="bday-day"
                         aria-describedby={describedBy("dob_greg_day")}
                         type="text"
                         inputMode="numeric"
@@ -2053,6 +2065,7 @@ export function MezgebWidget({
                       </label>
                       <select
                         id={getFieldDomId("dob_greg_month")}
+                        autoComplete="bday-month"
                         aria-describedby={describedBy("dob_greg_month")}
                         disabled={readOnly}
                         value={String(answers.dob_greg_month ?? "")}
@@ -2073,6 +2086,7 @@ export function MezgebWidget({
                       </label>
                       <input
                         id={getFieldDomId("dob_greg_year")}
+                        autoComplete="bday-year"
                         aria-describedby={describedBy("dob_greg_year")}
                         type="text"
                         inputMode="numeric"
