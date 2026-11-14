@@ -760,7 +760,9 @@ ${serialized}`;
 });
 
 async function startServer() {
-  const isProd = process.env.NODE_ENV === "production" && fs.existsSync(path.resolve("dist/index.html"));
+  // `--production` works on every OS (NODE_ENV=… prefixes don't work in Windows cmd/PowerShell)
+  const wantsProd = process.env.NODE_ENV === "production" || process.argv.includes("--production");
+  const isProd = wantsProd && fs.existsSync(path.resolve("dist/index.html"));
 
   if (!isProd) {
     const vite = await createViteServer({
@@ -771,7 +773,8 @@ async function startServer() {
   } else {
     const distDir = path.resolve("dist");
     app.use(express.static(distDir));
-    app.get("/{*path}", (_req, res) => {
+    // Express 4 wildcard ("/{*path}" is Express 5 syntax and matched nothing, so deep links 404'd)
+    app.get("*", (_req, res) => {
       res.sendFile(path.join(distDir, "index.html"));
     });
   }
