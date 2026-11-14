@@ -18,6 +18,34 @@ const RATE_LIMIT_MAX = 30;
 
 app.use(express.json({ limit: "2mb" }));
 
+// CORS for platforms that embed <mezgeb-register> on their own pages (browser calls to /api and /v1).
+const ALLOWED_ORIGINS = (process.env.MEZGEB_ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+app.use(["/api", "/v1"], (req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && (ALLOWED_ORIGINS.includes(origin) || ALLOWED_ORIGINS.includes("*"))) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  }
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
+
+// Level 1 embed script (build with `npm run build:embed`). Public asset, loadable from any page.
+app.get("/v1/mezgeb.js", (_req, res) => {
+  const file = path.resolve("dist-embed/mezgeb.js");
+  if (!fs.existsSync(file)) {
+    return res.status(404).type("text/plain").send("Embed not built. Run: npm run build:embed");
+  }
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cache-Control", "no-cache");
+  res.type("application/javascript").sendFile(file);
+});
+
 // Simple in-memory per-IP rate limiter for AI routes
 const rateHits = new Map<string, number[]>();
 function aiRateLimit(req: express.Request, res: express.Response, next: express.NextFunction) {

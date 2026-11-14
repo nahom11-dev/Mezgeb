@@ -1,3 +1,5 @@
+import { apiUrl } from "./apiBase";
+
 export interface OutboxRegistration {
   id: string;
   createdAt: string;
@@ -93,7 +95,7 @@ export async function flushOutbox(): Promise<
 
   for (const item of items) {
     try {
-      const res = await fetch("/api/registrations/outbox", {
+      const res = await fetch(apiUrl("/api/registrations/outbox"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(item),

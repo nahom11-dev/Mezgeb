@@ -1,6 +1,7 @@
 import { Lang } from "./i18n";
 import { MezgebTemplate, TemplateWarning } from "./templates/types";
 import { validateTemplate } from "./templates/validate";
+import { apiUrl } from "./lib/apiBase";
 
 const AI_TIMEOUT_MS = 8000;
 const VOICE_TIMEOUT_MS = 15000;
@@ -9,7 +10,7 @@ async function fetchWithTimeout(url: string, body: unknown, timeoutMs = AI_TIMEO
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, {
+    return await fetch(apiUrl(url), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -31,7 +32,7 @@ export async function getCapabilities(): Promise<ServerCapabilities> {
   try {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 4000);
-    const res = await fetch("/api/capabilities", { signal: controller.signal });
+    const res = await fetch(apiUrl("/api/capabilities"), { signal: controller.signal });
     window.clearTimeout(timer);
     if (!res.ok) {
       return { voice: false, smartHelp: false, skillsAi: false, simplifyAi: false };
