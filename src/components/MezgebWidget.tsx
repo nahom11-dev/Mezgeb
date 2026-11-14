@@ -2631,18 +2631,18 @@ export function MezgebWidget({
                 }
 
                 return (
-                  <div key={q.id} className="py-3.5 flex items-start justify-between gap-4">
-                    <div>
-                      <dt className="text-xs font-medium text-[#6B6B6B]">{q.label[lang]}</dt>
-                      <dd className="text-sm font-medium text-[#111111] mt-0.5">{displayVal}</dd>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setStepIndex(idx)}
-                      className="text-xs font-semibold text-[#6A4FC4] underline min-h-[36px] px-2 shrink-0"
-                    >
-                      {t("widgetChange")}
-                    </button>
+                  <div key={q.id} className="py-3.5 grid grid-cols-[1fr_auto] gap-x-4 items-start">
+                    <dt className="col-start-1 text-xs font-medium text-[#6B6B6B]">{q.label[lang]}</dt>
+                    <dd className="col-start-1 text-sm font-medium text-[#111111] mt-0.5">{displayVal}</dd>
+                    <dd className="col-start-2 row-start-1 row-span-2 self-start">
+                      <button
+                        type="button"
+                        onClick={() => setStepIndex(idx)}
+                        className="text-xs font-semibold text-[#6A4FC4] underline min-h-[36px] px-2"
+                      >
+                        {t("widgetChange")}
+                      </button>
+                    </dd>
                   </div>
                 );
               })}
