@@ -1109,7 +1109,7 @@ export function MezgebWidget({
   if (nextScreenState) {
     return (
       <div lang={lang} className="mezgeb-card p-6 md:p-8 space-y-6">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-4">
             <div className="w-11 h-11 rounded-full bg-[#E4F2EC] text-[#1F5C46] flex items-center justify-center shrink-0">
               <CheckIcon size={22} />
@@ -1579,8 +1579,8 @@ export function MezgebWidget({
       {/* Main Step Body */}
       {currentQuestion ? (
         <div className="space-y-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-3.5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3.5 flex-1 min-w-[12rem]">
               <div className="w-10 h-10 rounded-xl bg-[#F5F5F3] text-[#111111] flex items-center justify-center shrink-0 mt-0.5">
                 <QuestionIcon name={currentQuestion.icon} size={20} />
               </div>
@@ -1602,7 +1602,7 @@ export function MezgebWidget({
                 type="button"
                 onClick={handleSimplifyQuestion}
                 disabled={simplifying}
-                className="shrink-0 px-3 min-h-[36px] rounded-lg border border-[#E7E7E4] bg-white text-xs font-medium text-[#6A4FC4] hover:bg-[#EEEBF8]"
+                className="px-3 min-h-[36px] rounded-lg border border-[#E7E7E4] bg-white text-xs font-medium text-[#6A4FC4] hover:bg-[#EEEBF8]"
               >
                 {simplifying ? t("widgetSimplifying") : t("widgetSimplifyBtn")}
               </button>
@@ -2579,14 +2579,14 @@ export function MezgebWidget({
               )}
 
               {!readOnly && (
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <input
                     type="text"
                     value={customSkillInput}
                     onChange={(e) => setCustomSkillInput(e.target.value)}
                     placeholder={t("widgetSkillsAddPlaceholder")}
                     aria-label={t("widgetSkillsAddPlaceholder")}
-                    className="flex-1 min-h-[42px] px-3.5 rounded-lg border border-[#E7E7E4] text-sm"
+                    className="flex-1 min-w-0 basis-40 min-h-[42px] px-3.5 rounded-lg border border-[#E7E7E4] text-sm"
                   />
                   <button
                     type="button"

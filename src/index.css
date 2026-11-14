@@ -147,6 +147,14 @@
   }
 }
 
+/* WCAG 1.4.10: long labels wrap instead of pushing past narrow host columns */
+.mezgeb-btn-primary,
+.mezgeb-btn-secondary {
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+}
+
 /* Subtle grain texture for dark footer */
 .dark-grain {
   background-color: #161616;
