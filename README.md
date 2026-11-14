@@ -4,6 +4,8 @@ Mezgeb (Amharic: መዝገብ, "register") is an accessible sign-up and career o
 
 ## Run locally in 5 minutes
 
+Needs Node.js 20 or newer and git.
+
 1. Install dependencies:
    ```bash
    npm install
