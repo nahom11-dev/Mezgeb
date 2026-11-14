@@ -1,0 +1,104 @@
+{
+  "jobs": [
+    {
+      "id": "job_retail_01",
+      "title": "Retail assistant — Addis sample store",
+      "employer": "Sample Retail Co.",
+      "location": "Addis Ababa",
+      "datePosted": "2026-10-01",
+      "validThrough": "2026-12-31",
+      "description": "Sample listing: greet customers and restock shelves in a quiet corner of the shop.",
+      "accommodations": ["large_print", "flexible_hours", "quiet_room"]
+    },
+    {
+      "id": "job_call_02",
+      "title": "Call centre trainee",
+      "employer": "Demo Contact Hub",
+      "location": "Remote",
+      "datePosted": "2026-10-15",
+      "validThrough": "2027-01-15",
+      "description": "Sample remote role with screen-reader friendly systems and adjustable break times.",
+      "accommodations": ["screen_reader", "remote_option", "extra_time", "flexible_hours"]
+    },
+    {
+      "id": "job_warehouse_03",
+      "title": "Warehouse picker",
+      "employer": "Fictional Logistics PLC",
+      "location": "Adama",
+      "datePosted": "2026-09-20",
+      "validThrough": "2026-11-30",
+      "description": "Step-free routes and sign-language briefing on day one (sample data).",
+      "accommodations": ["step_free", "sign_language", "large_print"]
+    },
+    {
+      "id": "job_hospitality_04",
+      "title": "Hotel housekeeping",
+      "employer": "Sample Stay Hotel",
+      "location": "Bahir Dar",
+      "datePosted": "2026-10-05",
+      "validThrough": "2026-12-01",
+      "description": "Quiet room for breaks; extra time on training modules.",
+      "accommodations": ["quiet_room", "extra_time"]
+    },
+    {
+      "id": "job_admin_05",
+      "title": "Office administrator",
+      "employer": "Demo NGO",
+      "location": "Addis Ababa",
+      "datePosted": "2026-08-01",
+      "validThrough": "2027-02-01",
+      "description": "Hybrid desk work with flexible hours and interpreter support available.",
+      "accommodations": ["flexible_hours", "remote_option", "interpreter:am", "screen_reader"]
+    },
+    {
+      "id": "job_driver_06",
+      "title": "Delivery driver (light van)",
+      "employer": "Sample Courier",
+      "location": "Hawassa",
+      "datePosted": "2026-10-12",
+      "validThrough": "2027-01-01",
+      "description": "Large-print route sheets; no remote option.",
+      "accommodations": ["large_print", "flexible_hours"]
+    },
+    {
+      "id": "job_kitchen_07",
+      "title": "Kitchen assistant",
+      "employer": "Fictional Café",
+      "location": "Addis Ababa",
+      "datePosted": "2026-09-01",
+      "validThrough": "2026-11-15",
+      "description": "Step-free kitchen entrance; quiet break space.",
+      "accommodations": ["step_free", "quiet_room", "extra_time"]
+    },
+    {
+      "id": "job_data_08",
+      "title": "Data entry clerk",
+      "employer": "Sample Finance Bureau",
+      "location": "Remote",
+      "datePosted": "2026-10-20",
+      "validThrough": "2027-03-01",
+      "description": "Fully remote with screen reader tested forms.",
+      "accommodations": ["screen_reader", "remote_option", "extra_time", "flexible_hours"]
+    },
+    {
+      "id": "job_events_09",
+      "title": "Events usher",
+      "employer": "Demo Arena",
+      "location": "Addis Ababa",
+      "datePosted": "2026-10-18",
+      "validThrough": "2026-12-20",
+      "description": "Sign-language shifts; limited quiet room availability.",
+      "accommodations": ["sign_language", "large_print"]
+    },
+    {
+      "id": "job_research_10",
+      "title": "Research assistant",
+      "employer": "Fictional Institute",
+      "location": "Addis Ababa",
+      "datePosted": "2026-07-15",
+      "validThrough": "2027-06-01",
+      "description": "Interpreter:en supported; flexible schedule for medical appointments.",
+      "accommodations": ["interpreter:en", "flexible_hours", "quiet_room", "screen_reader"]
+    }
+  ]
+}

@@ -1,5 +1,5 @@
-data/
-data-test/
+/data/
+/data-test/
 node_modules/
 build/
 dist/
