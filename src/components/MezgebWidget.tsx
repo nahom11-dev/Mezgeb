@@ -87,6 +87,8 @@ interface MezgebWidgetProps {
   }) => void;
   onOutboxUpdated?: () => void;
   onReset?: () => void;
+  /** "widget" (embeds): Alt+H only when focus is inside the widget, so it never fires elsewhere on the host page. */
+  shortcutScope?: "window" | "widget";
 }
 
 function formatPhoneGrouped(raw: string): string {
@@ -158,6 +160,7 @@ export function MezgebWidget({
   onComplete,
   onOutboxUpdated,
   onReset,
+  shortcutScope = "window",
 }: MezgebWidgetProps) {
   const { lang, setLang, t } = useI18n();
   const { announce } = useLiveAnnouncer();
@@ -263,6 +266,12 @@ export function MezgebWidget({
   const textInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
   // Heading of whichever screen is showing (step, review, "registered", success) — focus target on screen change
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  /** getElementById that also works when the widget renders inside a shadow root. */
+  const byId = (id: string): HTMLElement | null => {
+    const node = rootRef.current?.getRootNode() as Document | ShadowRoot | undefined;
+    return (node && "getElementById" in node ? node : document).getElementById(id);
+  };
   const didMountRef = useRef(false);
 
   // Smart Help (Alt+H) - always available
@@ -506,13 +515,14 @@ export function MezgebWidget({
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.altKey && (e.key === "h" || e.key === "H")) {
+        if (shortcutScope === "widget" && !(rootRef.current && e.composedPath().includes(rootRef.current))) return;
         e.preventDefault();
         setHelpOpen((prev) => !prev);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [shortcutScope]);
 
   // Read aloud implementation (A5: never speak Amharic with an English voice)
   const speakText = (text: string, targetLang: Lang, audioUrl?: string) => {
@@ -1294,7 +1304,7 @@ export function MezgebWidget({
   };
 
   return (
-    <div lang={lang} className="mezgeb-card p-5 sm:p-7 md:p-8 space-y-6">
+    <div ref={rootRef} lang={lang} className="mezgeb-card p-5 sm:p-7 md:p-8 space-y-6">
       {/* Offline banner */}
       {offline && (
         <div role="status" className="p-3.5 rounded-xl bg-[#F9F3EA] border border-[#E7E7E4] text-sm text-[#111111]">
@@ -1444,7 +1454,7 @@ export function MezgebWidget({
                   href={`#${err.fieldId}`}
                   onClick={(e) => {
                     e.preventDefault();
-                    document.getElementById(err.fieldId)?.focus();
+                    byId(err.fieldId)?.focus();
                   }}
                   className="underline font-medium !text-red-900"
                 >
@@ -1488,7 +1498,7 @@ export function MezgebWidget({
                 ref={helpTakeMeRef}
                 type="button"
                 onClick={() => {
-                  const el = document.getElementById(helpTarget.id);
+                  const el = byId(helpTarget.id);
                   if (el) {
                     el.focus();
                     announce(t("widgetHelpMovedAnnouncement", { label: helpTarget.label }));
@@ -1552,7 +1562,7 @@ export function MezgebWidget({
                     <button
                       type="button"
                       onClick={() => {
-                        const el = document.getElementById(helpAiAnswer.targetFieldId!);
+                        const el = byId(helpAiAnswer.targetFieldId!);
                         if (el) {
                           el.focus();
                           announce(
