@@ -1286,7 +1286,7 @@ export function MezgebWidget({
               <span className="font-mono">{t("widgetRecordingStatus", { seconds: recordSeconds })}</span>
             </button>
           )}
-          <span className="text-xs text-[#6B6B6B]">{t("cloudAiNotice")}</span>
+          <span className="text-xs text-[#6B6B6B]">{t("widgetRecordingLimit")} {t("cloudAiNotice")}</span>
         </div>
 
         {pendingChoiceMatch && pendingChoiceMatch.fieldKey === q.id && (
@@ -1570,7 +1570,7 @@ export function MezgebWidget({
                   onChange={(e) => setHelpProblem(e.target.value)}
                   placeholder={t("widgetHelpPlaceholder")}
                   aria-label={t("widgetHelpPlaceholder")}
-                  className="flex-1 min-h-[42px] px-3 rounded-lg bg-white border border-[#E7E7E4] text-sm text-[#111111]"
+                  className="flex-1 min-h-[42px] px-3 rounded-lg bg-white border border-[#8A8A85] text-sm text-[#111111]"
                 />
                 <button
                   type="submit"
@@ -1705,7 +1705,7 @@ export function MezgebWidget({
                       </button>
                     )}
                   </div>
-                  <span className="text-xs text-[#6B6B6B]">{t("cloudAiNotice")}</span>
+                  <span className="text-xs text-[#6B6B6B]">{t("widgetRecordingLimit")} {t("cloudAiNotice")}</span>
                 </div>
 
                 {pendingTranscript && pendingTranscript.fieldKey === currentQuestion.id && (
@@ -1728,7 +1728,7 @@ export function MezgebWidget({
                       onChange={(e) =>
                         setPendingTranscript({ ...pendingTranscript, value: e.target.value })
                       }
-                      className="w-full min-h-[40px] px-3 rounded-lg border border-[#E7E7E4] text-sm"
+                      className="w-full min-h-[40px] px-3 rounded-lg border border-[#8A8A85] text-sm"
                     />
                     <div className="flex items-center gap-2">
                       <button
@@ -1773,7 +1773,7 @@ export function MezgebWidget({
                 onChange={(e) => updateAnswer(currentQuestion.id, e.target.value)}
                 aria-invalid={currentErrorMap.has(getFieldDomId(currentQuestion.id))}
                 aria-describedby={describedBy(currentQuestion.id)}
-                className="w-full min-h-[46px] px-4 rounded-xl border border-[#E7E7E4] text-base text-[#111111] bg-white"
+                className="w-full min-h-[46px] px-4 rounded-xl border border-[#8A8A85] text-base text-[#111111] bg-white"
               />
               {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
                 <p id={`${getFieldDomId(currentQuestion.id)}-err`} className="mt-2 text-sm text-red-700 font-medium">
@@ -1802,7 +1802,7 @@ export function MezgebWidget({
                 onChange={(e) => updateAnswer(currentQuestion.id, e.target.value)}
                 aria-invalid={currentErrorMap.has(getFieldDomId(currentQuestion.id))}
                 aria-describedby={describedBy(currentQuestion.id)}
-                className="w-full min-h-[46px] px-4 rounded-xl border border-[#E7E7E4] text-base text-[#111111] bg-white"
+                className="w-full min-h-[46px] px-4 rounded-xl border border-[#8A8A85] text-base text-[#111111] bg-white"
               />
               {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
                 <p id={`${getFieldDomId(currentQuestion.id)}-err`} className="mt-2 text-sm text-red-700 font-medium">
@@ -1831,7 +1831,7 @@ export function MezgebWidget({
                 onChange={(e) => updateAnswer(currentQuestion.id, e.target.value.replace(/[^\d.-]/g, ""))}
                 aria-invalid={currentErrorMap.has(getFieldDomId(currentQuestion.id))}
                 aria-describedby={describedBy(currentQuestion.id)}
-                className="w-full min-h-[46px] px-4 rounded-xl border border-[#E7E7E4] text-base font-mono text-[#111111] bg-white"
+                className="w-full min-h-[46px] px-4 rounded-xl border border-[#8A8A85] text-base font-mono text-[#111111] bg-white"
               />
               {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
                 <p id={`${getFieldDomId(currentQuestion.id)}-err`} className="mt-2 text-sm text-red-700 font-medium">
@@ -1958,7 +1958,7 @@ export function MezgebWidget({
                 onChange={(e) => updateAnswer(currentQuestion.id, normalizePhoneDigits(e.target.value))}
                 aria-invalid={currentErrorMap.has(getFieldDomId(currentQuestion.id))}
                 aria-describedby={describedBy(currentQuestion.id)}
-                className="w-full min-h-[46px] px-4 rounded-xl border border-[#E7E7E4] text-base font-mono tracking-wide text-[#111111] bg-white"
+                className="w-full min-h-[46px] px-4 rounded-xl border border-[#8A8A85] text-base font-mono tracking-wide text-[#111111] bg-white"
               />
               {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
                 <p id={`${getFieldDomId(currentQuestion.id)}-err`} className="mt-2 text-sm text-red-700 font-medium">
@@ -2016,7 +2016,7 @@ export function MezgebWidget({
                         placeholder="DD"
                         value={String(answers.dob_eth_day ?? "")}
                         onChange={(e) => updateAnswer("dob_eth_day", e.target.value.replace(/\D/g, "").slice(0, 2))}
-                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#E7E7E4] text-base"
+                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#8A8A85] text-base"
                       />
                     </div>
                     <div>
@@ -2029,7 +2029,7 @@ export function MezgebWidget({
                         disabled={readOnly}
                         value={String(answers.dob_eth_month ?? "")}
                         onChange={(e) => updateAnswer("dob_eth_month", e.target.value)}
-                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#E7E7E4] bg-white text-base"
+                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#8A8A85] bg-white text-base"
                       >
                         <option value="">{t("widgetCalChooseMonth")}</option>
                         {ETHIOPIAN_MONTHS.map((m) => (
@@ -2055,7 +2055,7 @@ export function MezgebWidget({
                         value={String(answers.dob_eth_year ?? "")}
                         onChange={(e) => updateAnswer("dob_eth_year", e.target.value.replace(/\D/g, "").slice(0, 4))}
                         aria-invalid={currentErrorMap.has(getFieldDomId("dob_eth_year"))}
-                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#E7E7E4] text-base"
+                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#8A8A85] text-base"
                       />
                     </div>
                   </div>
@@ -2092,7 +2092,7 @@ export function MezgebWidget({
                         placeholder="DD"
                         value={String(answers.dob_greg_day ?? "")}
                         onChange={(e) => updateAnswer("dob_greg_day", e.target.value.replace(/\D/g, "").slice(0, 2))}
-                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#E7E7E4] text-base"
+                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#8A8A85] text-base"
                       />
                     </div>
                     <div>
@@ -2106,7 +2106,7 @@ export function MezgebWidget({
                         disabled={readOnly}
                         value={String(answers.dob_greg_month ?? "")}
                         onChange={(e) => updateAnswer("dob_greg_month", e.target.value)}
-                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#E7E7E4] bg-white text-base"
+                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#8A8A85] bg-white text-base"
                       >
                         <option value="">{t("widgetCalChooseMonth")}</option>
                         {GREGORIAN_MONTHS_EN.map((m, idx) => (
@@ -2133,7 +2133,7 @@ export function MezgebWidget({
                         value={String(answers.dob_greg_year ?? "")}
                         onChange={(e) => updateAnswer("dob_greg_year", e.target.value.replace(/\D/g, "").slice(0, 4))}
                         aria-invalid={currentErrorMap.has(getFieldDomId("dob_greg_year"))}
-                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#E7E7E4] text-base"
+                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#8A8A85] text-base"
                       />
                     </div>
                   </div>
@@ -2336,7 +2336,7 @@ export function MezgebWidget({
                       disabled={readOnly}
                       value={String(answers.partner_org ?? "")}
                       onChange={(e) => updateAnswer("partner_org", e.target.value)}
-                      className="w-full min-h-[44px] px-3.5 rounded-xl border border-[#E7E7E4] bg-white text-sm"
+                      className="w-full min-h-[44px] px-3.5 rounded-xl border border-[#8A8A85] bg-white text-sm"
                     >
                       <option value="">—</option>
                       <option value="addis_accessibility">{t("widgetPartner1")}</option>
@@ -2484,7 +2484,7 @@ export function MezgebWidget({
                   value={String(answers.work_story ?? "")}
                   onChange={(e) => updateAnswer("work_story", e.target.value)}
                   aria-describedby={describedBy(currentQuestion.id)}
-                  className="w-full p-4 rounded-xl border border-[#E7E7E4] text-base text-[#111111] bg-white"
+                  className="w-full p-4 rounded-xl border border-[#8A8A85] text-base text-[#111111] bg-white"
                 />
               </div>
 
@@ -2625,7 +2625,7 @@ export function MezgebWidget({
                     onChange={(e) => setCustomSkillInput(e.target.value)}
                     placeholder={t("widgetSkillsAddPlaceholder")}
                     aria-label={t("widgetSkillsAddPlaceholder")}
-                    className="flex-1 min-w-0 basis-40 min-h-[42px] px-3.5 rounded-lg border border-[#E7E7E4] text-sm"
+                    className="flex-1 min-w-0 basis-40 min-h-[42px] px-3.5 rounded-lg border border-[#8A8A85] text-sm"
                   />
                   <button
                     type="button"
@@ -2843,7 +2843,7 @@ export function MezgebWidget({
                 placeholder="091 234 5678"
                 value={formatPhoneGrouped(smsPhone)}
                 onChange={(e) => setSmsPhone(normalizePhoneDigits(e.target.value))}
-                className="w-full min-h-[42px] px-3 rounded-lg border border-[#E7E7E4] bg-white font-mono text-sm"
+                className="w-full min-h-[42px] px-3 rounded-lg border border-[#8A8A85] bg-white font-mono text-sm"
               />
             </div>
             <button type="submit" className="mezgeb-btn-primary self-end text-sm">
