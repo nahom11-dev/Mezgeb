@@ -1,16 +1,35 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
+  Camera,
+  Check,
+  FileUp,
+  HelpCircle,
+  Lock,
+  MessageSquare,
+  Mic,
+  MoreHorizontal,
+  Plus,
+  Shield,
+  Type,
+  Users,
+  X,
+} from "lucide-react";
+import {
   extractSkillsFromStory,
+  fetchReadAloudAudio,
   getCapabilities,
   getSmartHelp,
+  PROVIDER_NAMES,
   ScreenSummaryForAi,
   ServerCapabilities,
   simplifyQuestionLabel,
   transcribeVoiceAnswer,
 } from "../ai";
+import { blobToWav16k } from "../lib/wav";
 import { Lang, TranslationKeys, translations, useI18n } from "../i18n";
 import {
   daysInEthiopianMonth,
+  daysInGregorianMonth,
   ETHIOPIAN_MONTHS,
   ethiopianToGregorian,
   formatEthiopianDate,
@@ -22,10 +41,8 @@ import {
   isValidGregorianDate,
 } from "../lib/ethiopianCalendar";
 import { addOutboxItem } from "../lib/outbox";
-import {
-  subscribePartnerSync,
-  upsertPartnerSession,
-} from "../lib/partnerSync";
+import { subscribePartnerSync, upsertPartnerSession } from "../lib/partnerSync";
+import { createRegistration } from "../lib/registrations";
 import { saveCompletedLearnerProfile } from "../lib/profileStore";
 import { safeGetStorage, safeRemoveStorage, safeSetStorage } from "../lib/storage";
 import {
@@ -39,21 +56,44 @@ import { getEffectiveSettings } from "../templates";
 import { IdRoute, MezgebTemplate, TemplateQuestion } from "../templates/types";
 import { validateTemplate } from "../templates/validate";
 import {
-  CheckIcon,
-  HelpCircleIcon,
-  LockIcon,
-  MicIcon,
-  QuestionIcon,
-  ShieldIcon,
-  VolumeIcon,
-} from "./Icons";
+  Badge,
+  Banner,
+  Button,
+  ChoiceList,
+  Field,
+  Progress,
+  ReadAloudButton,
+  useCanReadAloud,
+  VoiceButton,
+  VoiceState,
+} from "../ui";
+import { QuestionIcon } from "../ui/QuestionIcon";
 import { useLiveAnnouncer } from "./LiveAnnouncer";
+
+export type AnswerMode = "speak" | "type" | "simple";
+
+export type DemoWidgetTriggerType =
+  | "field_error"
+  | "voice_listening"
+  | "voice_review"
+  | "voice_failed"
+  | "outbox_sending"
+  | "help_open"
+  | "sms_sent"
+  | "restored";
+
+export interface MezgebWidgetEvent {
+  name: "step.completed" | "registration.completed";
+  timestamp: string;
+  payload: Record<string, unknown>;
+}
 
 export interface MezgebAnswers {
   [key: string]: unknown;
   id_route?: IdRoute;
   partner_org?: string;
   partner_consent?: boolean;
+  other_doc_name?: string;
   support_needs?: string[];
   support_share_platform?: boolean;
   support_share_employers?: boolean;
@@ -61,6 +101,45 @@ export interface MezgebAnswers {
   work_story?: string;
   skills?: string[];
   consent_accepted?: boolean;
+}
+
+export interface BuilderCanvasConfig {
+  editingLang: Lang;
+  rawQuestion: TemplateQuestion | null;
+  questionPosition: number;
+  questionTotal: number;
+  focusLabelTrigger?: number;
+  onUpdateLabel: (val: string) => void;
+  onUpdateHint: (val: string) => void;
+  onUpdateOptionLabel?: (optIndex: number, val: string) => void;
+  onRemoveOption?: (optIndex: number) => void;
+  onAddOption?: () => void;
+  onOpenPasteOptions?: () => void;
+  onAddOtherOption?: () => void;
+  onAddPreferNotOption?: () => void;
+  renderLabelActions?: React.ReactNode;
+  renderHintActions?: React.ReactNode;
+  renderAfterLabel?: React.ReactNode;
+  renderAfterHint?: React.ReactNode;
+  labels: {
+    editQuestionLabelAria: string;
+    editHintAria: string;
+    addHintBtn: string;
+    charsWarning: (count: number) => string;
+    englishReference: (text: string) => string;
+    addOptionBtn: string;
+    removeOptionAria: (optText: string) => string;
+    moreOptionsAria: string;
+    pasteOptionsItem: string;
+    addOtherItem: string;
+    addPreferNotItem: string;
+    disabledFooterTitle: string;
+    backLabel: string;
+    saveLabel: string;
+    progressLabel: string;
+    readAloudLabel: string;
+    helpLabel: string;
+  };
 }
 
 interface MezgebWidgetProps {
@@ -76,8 +155,17 @@ interface MezgebWidgetProps {
   singleQuestionMode?: boolean;
   jumpToQuestionId?: string | null;
   initialAnswers?: MezgebAnswers;
+  showWelcomeFlow?: boolean;
+  initialAnswerMode?: AnswerMode;
+  highContrast?: boolean;
+  assistedMode?: boolean;
+  assistedLearnerName?: string;
+  outboxCount?: number;
+  demoTrigger?: { type: DemoWidgetTriggerType; seq: number } | null;
+  builderCanvas?: BuilderCanvasConfig;
   onAnswersChange?: (answers: MezgebAnswers) => void;
   onAiPayloadLogged?: (payload: ScreenSummaryForAi) => void;
+  onEvent?: (event: MezgebWidgetEvent) => void;
   onComplete?: (result: {
     token: string;
     profile: Record<string, unknown>;
@@ -86,6 +174,12 @@ interface MezgebWidgetProps {
   }) => void;
   onOutboxUpdated?: () => void;
   onReset?: () => void;
+  /** "widget" (embeds): Alt+H only when focus is inside the widget. */
+  shortcutScope?: "window" | "widget";
+  /** Publishable key of the platform; the server ties the one-time token to it. */
+  siteKey?: string;
+  /** false (embeds): don't keep the completed profile on this device. */
+  persistProfile?: boolean;
 }
 
 function formatPhoneGrouped(raw: string): string {
@@ -93,6 +187,15 @@ function formatPhoneGrouped(raw: string): string {
   if (digits.length <= 3) return digits;
   if (digits.length <= 6) return `${digits.slice(0, 3)} ${digits.slice(3)}`;
   return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
+}
+
+function isDigitType(type: string): boolean {
+  return type === "phone" || type === "number";
+}
+
+/** "0911223344" -> "0 9 1 1 2 2 3 3 4 4" so it is read back one digit at a time. */
+function spellDigits(raw: string): string {
+  return raw.replace(/\D/g, "").split("").join(" ");
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
@@ -121,7 +224,7 @@ function createEmptyAnswers(defaultLang: Lang, partnerDefault?: boolean): Mezgeb
   return {
     language: defaultLang,
     id_route: partnerDefault ? "partner_refer" : undefined,
-    support_share_platform: false, // B2: OFF by default
+    support_share_platform: false,
     support_share_employers: false,
     support_share_partner: false,
     support_needs: [],
@@ -143,20 +246,43 @@ export function MezgebWidget({
   singleQuestionMode = false,
   jumpToQuestionId = null,
   initialAnswers,
+  showWelcomeFlow = false,
+  initialAnswerMode = "type",
+  highContrast = false,
+  assistedMode = false,
+  assistedLearnerName = "Learner",
+  outboxCount = 0,
+  demoTrigger = null,
+  builderCanvas,
   onAnswersChange,
   onAiPayloadLogged,
+  onEvent,
   onComplete,
   onOutboxUpdated,
   onReset,
+  shortcutScope = "window",
+  siteKey = "",
+  persistProfile = true,
 }: MezgebWidgetProps) {
-  const { lang, setLang, t } = useI18n();
+  const { lang: siteLang, setLang, t } = useI18n();
+  const lang: Lang = builderCanvas ? builderCanvas.editingLang : siteLang;
   const { announce } = useLiveAnnouncer();
   const widgetId = useId();
+
+  // Inline builder canvas editing state
+  const [editingCanvasField, setEditingCanvasField] = useState<"label" | "hint" | null>(null);
+  const [canvasDraftValue, setCanvasDraftValue] = useState("");
+  const [canvasOptMenuOpen, setCanvasOptMenuOpen] = useState(false);
+  const canvasLabelBtnRef = useRef<HTMLButtonElement>(null);
+  const canvasHintBtnRef = useRef<HTMLButtonElement>(null);
+  const canvasLabelInputRef = useRef<HTMLTextAreaElement>(null);
+  const canvasHintInputRef = useRef<HTMLTextAreaElement>(null);
+  const canvasOptMenuRef = useRef<HTMLDivElement>(null);
 
   const validation = validateTemplate(template);
   const safeTemplate = validation.template;
   const effectiveSettings = getEffectiveSettings(safeTemplate);
-  const effectiveAccent = accentColorProp ?? safeTemplate.theme?.accent ?? "#6A4FC4";
+  const effectiveAccent = accentColorProp ?? safeTemplate.theme?.accent ?? "var(--accent)";
   const effectivePlatformName = platformNameProp ?? safeTemplate.theme?.platformName ?? "Learnhub";
 
   const [capabilities, setCapabilities] = useState<ServerCapabilities>({
@@ -174,15 +300,41 @@ export function MezgebWidget({
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [aiEnabled, offline]);
 
   const effectiveAi = aiEnabled && !offline;
-  const canVoice = effectiveAi && capabilities.voice && effectiveSettings.voice;
+  const voiceProviderForLang = capabilities.voiceProviders
+    ? capabilities.voiceProviders[lang]
+    : capabilities.voiceProvider;
+  const canVoice =
+    effectiveAi &&
+    capabilities.voice &&
+    effectiveSettings.voice &&
+    (!capabilities.voiceProviders || Boolean(voiceProviderForLang));
+  const voiceNotice = voiceProviderForLang
+    ? t("voiceProviderNotice", { provider: PROVIDER_NAMES[voiceProviderForLang] })
+    : t("cloudAiNotice");
   const canSmartHelp = effectiveAi && capabilities.smartHelp && effectiveSettings.smartHelp;
   const canSkillsAi = effectiveAi && capabilities.skillsAi;
   const canSimplifyAi = effectiveAi && capabilities.simplifyAi && effectiveSettings.sayItSimply;
 
+  // Screen stages: welcome -> mode -> questions (stepIndex)
+  const useIntroScreens = showWelcomeFlow && !singleQuestionMode && !jumpToQuestionId;
+  const [stage, setStage] = useState<"welcome" | "mode" | "questions">(() =>
+    useIntroScreens && !resumeIdParam ? "welcome" : "questions"
+  );
+  const [answerMode, setAnswerMode] = useState<AnswerMode>(initialAnswerMode);
+  const [autoReadSimple, setAutoReadSimple] = useState(true);
+  const [resumeLinkInputOpen, setResumeLinkInputOpen] = useState(false);
+  const [resumeLinkValue, setResumeLinkValue] = useState("");
+  const [resumeError, setResumeError] = useState("");
+
+  useEffect(() => {
+    setAnswerMode(initialAnswerMode);
+  }, [initialAnswerMode]);
+
   const [stepIndex, setStepIndex] = useState<number>(0);
+  const [returnToReviewAfterEdit, setReturnToReviewAfterEdit] = useState(false);
   const [answers, setAnswers] = useState<MezgebAnswers>(() => ({
     ...createEmptyAnswers(lang, safeTemplate.partnerDefault),
     ...(initialAnswers ?? {}),
@@ -197,18 +349,12 @@ export function MezgebWidget({
   );
 
   const [hiddenRuleNotice, setHiddenRuleNotice] = useState(false);
-
   const [resumePromptStep, setResumePromptStep] = useState<number | null>(null);
   const [storageBlocked, setStorageBlocked] = useState(false);
   const [deviceClearedNotice, setDeviceClearedNotice] = useState(false);
+  const [outboxBannerState, setOutboxBannerState] = useState<"idle" | "sending" | "sent">("idle");
 
-  // Two-stage completion: What happens next screen -> Success / Queued screen
-  const [nextScreenState, setNextScreenState] = useState<{
-    token: string;
-    profile: Record<string, unknown>;
-    supportShared: boolean;
-    queuedOffline: boolean;
-  } | null>(null);
+  // Completion state
   const [completedState, setCompletedState] = useState<{
     token: string;
     profile: Record<string, unknown>;
@@ -220,25 +366,32 @@ export function MezgebWidget({
   const [partnerSessionId] = useState(() => `sess_${Math.random().toString(36).slice(2, 8)}`);
   const [partnerJoinedLive, setPartnerJoinedLive] = useState(false);
 
-  // Errors
-  const [errors, setErrors] = useState<{ fieldId: string; code: string; message: string; fieldLabel: string }[]>([]);
+  // Validation errors
+  const [errors, setErrors] = useState<
+    { fieldId: string; code: string; message: string; fieldLabel: string }[]
+  >([]);
   const errorSummaryRef = useRef<HTMLDivElement>(null);
+  const questionHeadingRef = useRef<HTMLHeadingElement>(null);
 
-  // Speech / pre-recorded audio
+  // Read aloud
   const [speaking, setSpeaking] = useState(false);
   const [noAmharicVoiceNote, setNoAmharicVoiceNote] = useState(false);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const ttsAbortRef = useRef<AbortController | null>(null);
+  const ttsUrlCacheRef = useRef(new Map<string, string>());
+  const rootRef = useRef<HTMLDivElement>(null);
+  const byId = (id: string): HTMLElement | null => {
+    const node = rootRef.current?.getRootNode() as Document | ShadowRoot | undefined;
+    return (node && "getElementById" in node ? node : document).getElementById(id);
+  };
 
-  // Voice recording (MediaRecorder)
-  const [recording, setRecording] = useState(false);
+  // Voice recording & simulated demo states
+  const [voiceUiState, setVoiceUiState] = useState<VoiceState>("idle");
   const [recordSeconds, setRecordSeconds] = useState(0);
-  const [sendingVoice, setSendingVoice] = useState(false);
-  const [voiceMessage, setVoiceMessage] = useState<string | null>(null);
   const [pendingTranscript, setPendingTranscript] = useState<{
     fieldKey: string;
     transcript: string;
     value: string;
-    confidence: string;
   } | null>(null);
   const [pendingChoiceMatch, setPendingChoiceMatch] = useState<{
     fieldKey: string;
@@ -252,7 +405,7 @@ export function MezgebWidget({
   const recordTimerRef = useRef<number | null>(null);
   const textInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
 
-  // Smart Help (Alt+H) - always available
+  // Help panel
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpProblem, setHelpProblem] = useState("");
   const [helpLoading, setHelpLoading] = useState(false);
@@ -263,21 +416,21 @@ export function MezgebWidget({
   } | null>(null);
   const [partnerHelpVisible, setPartnerHelpVisible] = useState(false);
   const helpBtnRef = useRef<HTMLButtonElement>(null);
-  const helpInputRef = useRef<HTMLInputElement>(null);
-  const helpTakeMeRef = useRef<HTMLButtonElement>(null);
-  const helpCloseRef = useRef<HTMLButtonElement>(null);
+  const helpHeadingRef = useRef<HTMLHeadingElement>(null);
 
-  // Simplify ("Say it more simply")
+  // Simplify wording
   const [simplifying, setSimplifying] = useState(false);
   const [simplifiedInfo, setSimplifiedInfo] = useState<{ usedAi: boolean; text: string } | null>(null);
 
   // Skills extraction
   const [extractingSkills, setExtractingSkills] = useState(false);
-  const [pendingSuggestedSkills, setPendingSuggestedSkills] = useState<{ name: string; evidence: string }[]>([]);
+  const [pendingSuggestedSkills, setPendingSuggestedSkills] = useState<
+    { name: string; evidence: string }[]
+  >([]);
   const [customSkillInput, setCustomSkillInput] = useState("");
   const [showSkillsFallback, setShowSkillsFallback] = useState(false);
 
-  // Finish later by SMS
+  // Save-and-resume SMS link
   const [smsOpen, setSmsOpen] = useState(false);
   const [smsPhone, setSmsPhone] = useState("");
   const [smsPhoneError, setSmsPhoneError] = useState("");
@@ -294,6 +447,8 @@ export function MezgebWidget({
           if (parsed && typeof parsed.stepIndex === "number" && parsed.answers) {
             setAnswers((prev) => ({ ...prev, ...parsed.answers }));
             setStepIndex(Math.min(parsed.stepIndex, totalSteps - 1));
+            setResumePromptStep(parsed.stepIndex + 1);
+            setStage("questions");
             return;
           }
         } catch {
@@ -317,18 +472,44 @@ export function MezgebWidget({
         // ignore
       }
     }
-  }, [readOnly, singleQuestionMode, ephemeralPreview, storageKey, resumeIdParam, totalSteps, effectiveSettings.offline]);
+  }, [
+    readOnly,
+    singleQuestionMode,
+    ephemeralPreview,
+    storageKey,
+    resumeIdParam,
+    totalSteps,
+    effectiveSettings.offline,
+  ]);
 
-  // Autosave (EXCLUDING support_needs and support_share_* for privacy B2)
+  // Autosave (excluding private support fields)
   useEffect(() => {
     onAnswersChange?.(answers);
-    if (readOnly || singleQuestionMode || ephemeralPreview || completedState || nextScreenState || !effectiveSettings.offline) return;
+    if (
+      readOnly ||
+      singleQuestionMode ||
+      ephemeralPreview ||
+      completedState ||
+      !effectiveSettings.offline
+    ) {
+      return;
+    }
     const sanitized = stripSupportFromAnswers(answers);
     const res = safeSetStorage(storageKey, JSON.stringify({ stepIndex, answers: sanitized }));
     if (res.blocked) setStorageBlocked(true);
-  }, [answers, stepIndex, readOnly, singleQuestionMode, ephemeralPreview, storageKey, completedState, nextScreenState, onAnswersChange, effectiveSettings.offline]);
+  }, [
+    answers,
+    stepIndex,
+    readOnly,
+    singleQuestionMode,
+    ephemeralPreview,
+    storageKey,
+    completedState,
+    onAnswersChange,
+    effectiveSettings.offline,
+  ]);
 
-  // Jump to selected question from external preview / builder outline
+  // Jump to selected question from builder / preview
   useEffect(() => {
     if (!jumpToQuestionId) {
       setHiddenRuleNotice(false);
@@ -336,8 +517,8 @@ export function MezgebWidget({
     }
     const visIdx = visibleQuestions.findIndex((q) => q.id === jumpToQuestionId);
     if (visIdx >= 0) {
-      setNextScreenState(null);
       setCompletedState(null);
+      setStage("questions");
       setStepIndex(visIdx);
       setHiddenRuleNotice(false);
     } else if (safeTemplate.questions.some((q) => q.id === jumpToQuestionId)) {
@@ -346,7 +527,6 @@ export function MezgebWidget({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jumpToQuestionId, visibleQuestions.length]);
 
-  // Keep stepIndex inside bounds if questions or showIf rules change
   useEffect(() => {
     if (stepIndex >= totalSteps) {
       setStepIndex(Math.max(0, totalSteps - 1));
@@ -360,13 +540,21 @@ export function MezgebWidget({
       if (msg.type === "partner_joined" && msg.sessionId === partnerSessionId) {
         setPartnerJoinedLive(true);
         announce(t("widgetPartnerJoinedBanner"));
-      } else if (msg.type === "partner_verified" && msg.sessionId === partnerSessionId && msg.verifiedAt) {
+      } else if (
+        msg.type === "partner_verified" &&
+        msg.sessionId === partnerSessionId &&
+        msg.verifiedAt
+      ) {
         setPartnerJoinedLive(true);
         setCompletedState((prev) =>
           prev
             ? {
                 ...prev,
-                profile: { ...prev.profile, id_route: "partner_verified", verified_at: msg.verifiedAt },
+                profile: {
+                  ...prev.profile,
+                  id_route: "partner_verified",
+                  verified_at: msg.verifiedAt,
+                },
               }
             : prev
         );
@@ -375,9 +563,39 @@ export function MezgebWidget({
     return unsub;
   }, [readOnly, singleQuestionMode, ephemeralPreview, partnerSessionId, announce, t]);
 
-  const currentQuestion: TemplateQuestion | null =
-    stepIndex < visibleQuestions.length ? visibleQuestions[stepIndex] : null;
-  const isReviewStep = !singleQuestionMode && stepIndex === visibleQuestions.length;
+  const currentQuestion: TemplateQuestion | null = builderCanvas
+    ? builderCanvas.rawQuestion
+    : stepIndex < visibleQuestions.length
+      ? visibleQuestions[stepIndex]
+      : null;
+  const isReviewStep = !singleQuestionMode && !builderCanvas && stepIndex === visibleQuestions.length;
+
+  useEffect(() => {
+    setEditingCanvasField(null);
+    setCanvasOptMenuOpen(false);
+  }, [builderCanvas?.rawQuestion?.id, builderCanvas?.editingLang]);
+
+  useEffect(() => {
+    if (!builderCanvas?.focusLabelTrigger || !builderCanvas.rawQuestion) return;
+    setEditingCanvasField("label");
+    setCanvasDraftValue(builderCanvas.rawQuestion.label[builderCanvas.editingLang] ?? "");
+    const timer = window.setTimeout(() => {
+      canvasLabelInputRef.current?.focus();
+    }, 30);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [builderCanvas?.focusLabelTrigger]);
+
+  useEffect(() => {
+    if (!canvasOptMenuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!canvasOptMenuRef.current?.contains(e.target as Node)) {
+        setCanvasOptMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [canvasOptMenuOpen]);
 
   useEffect(() => {
     if (readOnly || singleQuestionMode || ephemeralPreview) return;
@@ -390,7 +608,9 @@ export function MezgebWidget({
         questionLabel: currentQuestion ? currentQuestion.label[lang] : t("widgetReviewTitle"),
         maskedFields: visibleQuestions.map((q) => {
           const val = answers[q.id];
-          const hasValue = Array.isArray(val) ? val.length > 0 : Boolean(val && String(val).trim() !== "");
+          const hasValue = Array.isArray(val)
+            ? val.length > 0
+            : Boolean(val && String(val).trim() !== "");
           return { id: q.id, label: q.label[lang], hasValue };
         }),
         partnerJoined: partnerJoinedLive,
@@ -413,15 +633,20 @@ export function MezgebWidget({
     t,
   ]);
 
-  // Cleanup media & speech on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (recordTimerRef.current) window.clearInterval(recordTimerRef.current);
       mediaStreamRef.current?.getTracks().forEach((tr) => tr.stop());
-      if ("speechSynthesis" in window) {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
       audioElRef.current?.pause();
+      ttsAbortRef.current?.abort();
+      for (const url of ttsUrlCacheRef.current.values()) {
+        URL.revokeObjectURL(url);
+      }
+      ttsUrlCacheRef.current.clear();
     };
   }, []);
 
@@ -432,87 +657,41 @@ export function MezgebWidget({
     setErrors((prev) => prev.filter((e) => e.fieldId !== getFieldDomId(key)));
   };
 
-  // Clear transient step UI on step change
+  // Clear transient step state on step change
   useEffect(() => {
     setErrors([]);
-    setVoiceMessage(null);
+    setVoiceUiState("idle");
     setPendingTranscript(null);
     setPendingChoiceMatch(null);
     setHelpAiAnswer(null);
     setPartnerHelpVisible(false);
-    setNoAmharicVoiceNote(false);
     setSimplifiedInfo(null);
-    if ("speechSynthesis" in window) {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
       setSpeaking(false);
     }
     audioElRef.current?.pause();
-  }, [stepIndex]);
+    ttsAbortRef.current?.abort();
+    ttsAbortRef.current = null;
+    setNoAmharicVoiceNote(false);
+  }, [stepIndex, stage]);
 
-  // Help panel Escape & focus management (B4)
-  useEffect(() => {
-    if (!helpOpen) return;
-    const focusTimer = window.setTimeout(() => {
-      if (errors.length > 0 && helpTakeMeRef.current) {
-        helpTakeMeRef.current.focus();
-      } else if (canSmartHelp && helpInputRef.current) {
-        helpInputRef.current.focus();
-      } else {
-        helpCloseRef.current?.focus();
-      }
-    }, 20);
+  const serverReadAloudForLang = Boolean(effectiveAi && capabilities.readAloudProviders?.[lang]);
 
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setHelpOpen(false);
-        helpBtnRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.clearTimeout(focusTimer);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [helpOpen, errors.length, canSmartHelp]);
+  // Read aloud availability check
+  const canReadCurrent = useCanReadAloud(lang, currentQuestion?.audio?.[lang], serverReadAloudForLang);
 
-  // Alt+H keyboard shortcut ALWAYS works (A2)
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.altKey && (e.key === "h" || e.key === "H")) {
-        e.preventDefault();
-        setHelpOpen((prev) => !prev);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+  const playAudio = useCallback((url: string): Promise<void> => {
+    const audio = new Audio(url);
+    audioElRef.current = audio;
+    audio.onended = () => setSpeaking(false);
+    audio.onerror = () => setSpeaking(false);
+    setSpeaking(true);
+    return audio.play();
   }, []);
 
-  // Read aloud implementation (A5: never speak Amharic with an English voice)
-  const speakText = (text: string, targetLang: Lang, audioUrl?: string) => {
-    if (speaking) {
-      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
-      audioElRef.current?.pause();
-      setSpeaking(false);
-      return;
-    }
-
-    // 1. Pre-recorded audio file if provided
-    if (audioUrl) {
-      try {
-        const audio = new Audio(audioUrl);
-        audioElRef.current = audio;
-        audio.onended = () => setSpeaking(false);
-        audio.onerror = () => setSpeaking(false);
-        setSpeaking(true);
-        audio.play().catch(() => setSpeaking(false));
-        return;
-      } catch {
-        // fall through to speechSynthesis
-      }
-    }
-
-    if (!("speechSynthesis" in window)) return;
+  const speakWithBrowserVoice = useCallback((text: string, targetLang: Lang) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     const voices = window.speechSynthesis.getVoices();
     const hasTargetVoice =
       targetLang === "am"
@@ -520,7 +699,6 @@ export function MezgebWidget({
         : voices.length === 0 || voices.some((v) => v.lang.toLowerCase().startsWith("en"));
 
     if (targetLang === "am" && !hasTargetVoice) {
-      // Never speak Amharic text with a non-Amharic voice!
       setNoAmharicVoiceNote(true);
       setSpeaking(false);
       return;
@@ -531,20 +709,59 @@ export function MezgebWidget({
     utterance.lang = targetLang === "am" ? "am-ET" : "en-US";
     utterance.onend = () => setSpeaking(false);
     utterance.onerror = () => setSpeaking(false);
-
     window.speechSynthesis.cancel();
     setSpeaking(true);
     window.speechSynthesis.speak(utterance);
-  };
+  }, []);
 
-  const handleReadCurrentStep = () => {
-    if (currentQuestion) {
-      const text = `${currentQuestion.label[lang]}. ${currentQuestion.hint?.[lang] ?? ""}`;
-      speakText(text, lang, currentQuestion.audio?.[lang]);
-    } else {
-      speakText(t("widgetReviewTitle"), lang);
-    }
-  };
+  const speakText = useCallback(
+    (text: string, targetLang: Lang, audioUrl?: string) => {
+      if (speaking) {
+        if (typeof window !== "undefined" && "speechSynthesis" in window) {
+          window.speechSynthesis.cancel();
+        }
+        audioElRef.current?.pause();
+        ttsAbortRef.current?.abort();
+        ttsAbortRef.current = null;
+        setSpeaking(false);
+        return;
+      }
+
+      if (audioUrl) {
+        playAudio(audioUrl).catch(() => setSpeaking(false));
+        return;
+      }
+
+      if (effectiveAi && capabilities.readAloudProviders?.[targetLang]) {
+        setNoAmharicVoiceNote(false);
+        const key = `${targetLang}|${text}`;
+        const fallBack = () => {
+          setSpeaking(false);
+          speakWithBrowserVoice(text, targetLang);
+        };
+        const cached = ttsUrlCacheRef.current.get(key);
+        if (cached) {
+          playAudio(cached).catch(fallBack);
+          return;
+        }
+        const controller = new AbortController();
+        ttsAbortRef.current = controller;
+        setSpeaking(true);
+        fetchReadAloudAudio(text, targetLang, controller.signal).then((blob) => {
+          if (controller.signal.aborted) return;
+          ttsAbortRef.current = null;
+          if (!blob) return fallBack();
+          const url = URL.createObjectURL(blob);
+          ttsUrlCacheRef.current.set(key, url);
+          playAudio(url).catch(fallBack);
+        });
+        return;
+      }
+
+      speakWithBrowserVoice(text, targetLang);
+    },
+    [speaking, effectiveAi, capabilities.readAloudProviders, playAudio, speakWithBrowserVoice]
+  );
 
   const handleReadEnglishFallback = () => {
     if (currentQuestion) {
@@ -555,6 +772,142 @@ export function MezgebWidget({
     }
   };
 
+  // Auto-read once per question in Simple words with pictures mode
+  const lastAutoReadKeyRef = useRef<string>("");
+  useEffect(() => {
+    if (
+      stage !== "questions" ||
+      answerMode !== "simple" ||
+      !autoReadSimple ||
+      !effectiveSettings.readAloud ||
+      !canReadCurrent ||
+      readOnly
+    ) {
+      return;
+    }
+    const key = `${stepIndex}-${currentQuestion?.id ?? "review"}-${lang}`;
+    if (lastAutoReadKeyRef.current === key) return;
+    lastAutoReadKeyRef.current = key;
+    const textToRead = currentQuestion
+      ? currentQuestion.hint?.[lang] || currentQuestion.label[lang]
+      : t("widgetReviewTitle");
+    if (textToRead && !speaking) {
+      speakText(textToRead, lang, currentQuestion?.audio?.[lang]);
+    }
+  }, [
+    stage,
+    answerMode,
+    autoReadSimple,
+    effectiveSettings.readAloud,
+    canReadCurrent,
+    readOnly,
+    stepIndex,
+    currentQuestion,
+    lang,
+    t,
+    speaking,
+    speakText,
+  ]);
+
+  // Help panel Escape & focus management
+  useEffect(() => {
+    if (!helpOpen) return;
+    const timer = window.setTimeout(() => {
+      helpHeadingRef.current?.focus();
+    }, 20);
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setHelpOpen(false);
+        (textInputRef.current ?? helpBtnRef.current)?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [helpOpen]);
+
+  // Alt+H keyboard shortcut always works
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && (e.key === "h" || e.key === "H")) {
+        if (
+          shortcutScope === "widget" &&
+          !(rootRef.current && e.composedPath().includes(rootRef.current))
+        ) {
+          return;
+        }
+        e.preventDefault();
+        setHelpOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [shortcutScope]);
+
+  // Demo state trigger handler (Section 6.2 & 9.3)
+  useEffect(() => {
+    if (!demoTrigger) return;
+    const { type } = demoTrigger;
+    setCompletedState(null);
+    setStage("questions");
+
+    if (type === "field_error") {
+      const phoneIdx = visibleQuestions.findIndex((q) => q.type === "phone");
+      const targetIdx = phoneIdx >= 0 ? phoneIdx : Math.min(1, visibleQuestions.length - 1);
+      setStepIndex(targetIdx);
+      const q = visibleQuestions[targetIdx];
+      if (q) {
+        setErrors([
+          {
+            fieldId: getFieldDomId(q.id),
+            code: q.type === "phone" ? "PHONE_INVALID" : "REQUIRED",
+            message: q.type === "phone" ? t("errPhoneFormat") : t("errRequired"),
+            fieldLabel: q.label[lang],
+          },
+        ]);
+      }
+    } else if (type === "voice_listening") {
+      const nameIdx = visibleQuestions.findIndex((q) => q.type === "text");
+      if (nameIdx >= 0) setStepIndex(nameIdx);
+      setVoiceUiState("listening");
+      setRecordSeconds(3);
+    } else if (type === "voice_review") {
+      const nameIdx = visibleQuestions.findIndex((q) => q.type === "text");
+      const targetQ = nameIdx >= 0 ? visibleQuestions[nameIdx] : visibleQuestions[0];
+      if (nameIdx >= 0) setStepIndex(nameIdx);
+      if (targetQ) {
+        const sample = lang === "am" ? "ሐና ተስፋዬ" : t("demoSimulatedVoiceSample");
+        setPendingTranscript({
+          fieldKey: targetQ.id,
+          transcript: sample,
+          value: sample,
+        });
+        setVoiceUiState("review");
+      }
+    } else if (type === "voice_failed") {
+      const nameIdx = visibleQuestions.findIndex((q) => q.type === "text");
+      if (nameIdx >= 0) setStepIndex(nameIdx);
+      setVoiceUiState("failed");
+    } else if (type === "outbox_sending") {
+      setOutboxBannerState("sending");
+    } else if (type === "help_open") {
+      setHelpOpen(true);
+    } else if (type === "sms_sent") {
+      setSmsOpen(true);
+      setSmsPhone("0911234567");
+      setSmsGeneratedLink(`${window.location.origin}/demo?resume=mzg_demo_5`);
+    } else if (type === "restored") {
+      const targetStep = Math.min(4, Math.max(0, visibleQuestions.length - 1));
+      setStepIndex(targetStep);
+      setResumePromptStep(targetStep + 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoTrigger?.seq]);
+
   const stopVoiceRecording = useCallback(() => {
     if (recordTimerRef.current) {
       window.clearInterval(recordTimerRef.current);
@@ -562,8 +915,9 @@ export function MezgebWidget({
     }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
+    } else {
+      setVoiceUiState("idle");
     }
-    setRecording(false);
   }, []);
 
   const startVoiceRecording = async (
@@ -574,12 +928,11 @@ export function MezgebWidget({
     isMulti?: boolean
   ) => {
     if (!canVoice || readOnly) return;
-    setVoiceMessage(null);
     setPendingTranscript(null);
     setPendingChoiceMatch(null);
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setVoiceMessage(t("widgetVoiceNoMic"));
+      setVoiceUiState("failed");
       textInputRef.current?.focus();
       return;
     }
@@ -588,14 +941,12 @@ export function MezgebWidget({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
       const chunks: BlobPart[] = [];
-
-      let recorder: MediaRecorder;
       const opusMime = "audio/webm;codecs=opus";
-      if (typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported(opusMime)) {
-        recorder = new MediaRecorder(stream, { mimeType: opusMime, audioBitsPerSecond: 16000 });
-      } else {
-        recorder = new MediaRecorder(stream);
-      }
+      const recorder =
+        typeof MediaRecorder.isTypeSupported === "function" &&
+        MediaRecorder.isTypeSupported(opusMime)
+          ? new MediaRecorder(stream, { mimeType: opusMime, audioBitsPerSecond: 16000 })
+          : new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
 
       recorder.ondataavailable = (ev) => {
@@ -604,59 +955,63 @@ export function MezgebWidget({
 
       recorder.onstop = async () => {
         stream.getTracks().forEach((tr) => tr.stop());
-        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-        if (blob.size > 1_000_000) {
-          setVoiceMessage(t("widgetVoiceTooLarge"));
-          return;
-        }
-        setSendingVoice(true);
+        const recorded = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        setVoiceUiState("processing");
         try {
+          const blob = await blobToWav16k(recorded);
+          if (blob.size > 1_000_000) {
+            setVoiceUiState("failed");
+            return;
+          }
           const base64 = await blobToBase64(blob);
+          const sendMime =
+            blob.type && blob.type.toLowerCase().includes("wav") ? "audio/wav" : blob.type || "audio/webm";
           const result = await transcribeVoiceAnswer({
             audioBase64: base64,
-            mimeType: blob.type || "audio/webm",
+            mimeType: sendMime,
             questionLabel,
             expectedType,
             lang,
             options,
           });
           if (!result.ok || !result.transcript) {
-            setVoiceMessage(t("widgetVoiceTimeout"));
+            setVoiceUiState("failed");
             textInputRef.current?.focus();
           } else if (options && options.length > 0) {
-            if (result.matchedValue) {
-              const matchedOpt = options.find((o) => o.value === result.matchedValue);
-              if (matchedOpt) {
-                setPendingChoiceMatch({
-                  fieldKey,
-                  matchedValue: matchedOpt.value,
-                  matchedLabel: matchedOpt.label,
-                  isMulti,
-                });
-              } else {
-                setVoiceMessage(t("widgetVoiceChoiceNoMatch"));
-              }
+            const matchedOpt = result.matchedValue
+              ? options.find((o) => o.value === result.matchedValue)
+              : undefined;
+            if (matchedOpt) {
+              setPendingChoiceMatch({
+                fieldKey,
+                matchedValue: matchedOpt.value,
+                matchedLabel: matchedOpt.label,
+                isMulti,
+              });
+              setVoiceUiState("idle");
             } else {
-              setVoiceMessage(t("widgetVoiceChoiceNoMatch"));
+              setVoiceUiState("failed");
             }
           } else {
             setPendingTranscript({
               fieldKey,
               transcript: result.transcript,
               value: result.value,
-              confidence: result.confidence,
             });
+            setVoiceUiState("review");
+            const heard = isDigitType(expectedType)
+              ? spellDigits(result.value)
+              : result.value || result.transcript;
+            announce(`${t("widgetTranscriptConfirmTitle")} ${heard}`);
           }
         } catch {
-          setVoiceMessage(t("widgetVoiceTimeout"));
+          setVoiceUiState("failed");
           textInputRef.current?.focus();
-        } finally {
-          setSendingVoice(false);
         }
       };
 
       recorder.start();
-      setRecording(true);
+      setVoiceUiState("listening");
       setRecordSeconds(0);
 
       recordTimerRef.current = window.setInterval(() => {
@@ -669,12 +1024,17 @@ export function MezgebWidget({
         });
       }, 1000);
     } catch {
-      setVoiceMessage(t("widgetVoiceNoMic"));
+      setVoiceUiState("failed");
       textInputRef.current?.focus();
     }
   };
 
-  const validateCurrentStep = (): { fieldId: string; code: string; message: string; fieldLabel: string }[] => {
+  const validateCurrentStep = (): {
+    fieldId: string;
+    code: string;
+    message: string;
+    fieldLabel: string;
+  }[] => {
     if (readOnly) return [];
     const found: { fieldId: string; code: string; message: string; fieldLabel: string }[] = [];
 
@@ -685,9 +1045,7 @@ export function MezgebWidget({
       const strVal = String(val ?? "").trim();
       const rules = currentQuestion.validation;
 
-      if (currentQuestion.type === "info") {
-        return [];
-      }
+      if (currentQuestion.type === "info") return [];
 
       if (currentQuestion.type === "text") {
         if (currentQuestion.required && !strVal) {
@@ -827,6 +1185,13 @@ export function MezgebWidget({
     return found;
   };
 
+  const focusNewQuestionHeading = (nextStepNum: number) => {
+    announce(t("widgetStepOf", { current: nextStepNum, total: totalSteps }));
+    window.setTimeout(() => {
+      questionHeadingRef.current?.focus();
+    }, 20);
+  };
+
   const handleNext = async () => {
     const stepErrors = validateCurrentStep();
     if (stepErrors.length > 0) {
@@ -838,9 +1203,29 @@ export function MezgebWidget({
       return;
     }
 
+    if (currentQuestion) {
+      onEvent?.({
+        name: "step.completed",
+        timestamp: new Date().toLocaleTimeString(),
+        payload: {
+          questionId: currentQuestion.id,
+          maps_to: currentQuestion.maps_to,
+          mode: answerMode,
+        },
+      });
+    }
+
+    if (returnToReviewAfterEdit && !singleQuestionMode) {
+      setReturnToReviewAfterEdit(false);
+      setStepIndex(visibleQuestions.length);
+      focusNewQuestionHeading(visibleQuestions.length + 1);
+      return;
+    }
+
     if (stepIndex < totalSteps - 1) {
-      setStepIndex((i) => i + 1);
-      announce(t("widgetStepOf", { current: stepIndex + 2, total: totalSteps }));
+      const nextIdx = stepIndex + 1;
+      setStepIndex(nextIdx);
+      focusNewQuestionHeading(nextIdx + 1);
     } else {
       await handleComplete();
     }
@@ -850,8 +1235,9 @@ export function MezgebWidget({
     if (!currentQuestion || currentQuestion.required) return;
     setErrors([]);
     if (stepIndex < totalSteps - 1) {
-      setStepIndex((i) => i + 1);
-      announce(t("widgetStepOf", { current: stepIndex + 2, total: totalSteps }));
+      const nextIdx = stepIndex + 1;
+      setStepIndex(nextIdx);
+      focusNewQuestionHeading(nextIdx + 1);
     } else {
       await handleComplete();
     }
@@ -862,10 +1248,21 @@ export function MezgebWidget({
       answers,
       template: safeTemplate,
     });
-    const token = `mzg_tok_${Math.random().toString(16).slice(2, 10)}`;
-    const isActuallyOffline = offline || (typeof navigator !== "undefined" && !navigator.onLine);
+    let isActuallyOffline = offline || (typeof navigator !== "undefined" && !navigator.onLine);
+    let token = "";
+    if (singleQuestionMode || ephemeralPreview) {
+      token = "mzg_tok_preview";
+    } else if (!isActuallyOffline) {
+      try {
+        token = siteKey
+          ? await createRegistration(siteKey, profile)
+          : `mzg_tok_${Math.random().toString(16).slice(2, 10)}`;
+      } catch {
+        isActuallyOffline = true;
+      }
+    }
 
-    if (!singleQuestionMode && !ephemeralPreview) {
+    if (!singleQuestionMode && !ephemeralPreview && persistProfile) {
       saveCompletedLearnerProfile({
         profile,
         rawAnswers: answers,
@@ -884,6 +1281,7 @@ export function MezgebWidget({
         createdAt: new Date().toISOString(),
         profile,
         supportShared,
+        ...(siteKey ? { siteKey } : {}),
       });
       onOutboxUpdated?.();
     }
@@ -893,13 +1291,19 @@ export function MezgebWidget({
     }
 
     const payload = { token, profile, supportShared, queuedOffline: isActuallyOffline };
-    if (singleQuestionMode) {
-      setCompletedState(payload);
-      onComplete?.(payload);
-    } else {
-      setNextScreenState(payload);
-      announce(t("widgetNextScreenTitle"));
-    }
+    onEvent?.({
+      name: "registration.completed",
+      timestamp: new Date().toLocaleTimeString(),
+      payload: {
+        token,
+        id_route: profile.id_route ?? null,
+        support_shared: supportShared,
+        queued_offline: isActuallyOffline,
+      },
+    });
+    setCompletedState(payload);
+    announce(isActuallyOffline ? t("widgetOfflineQueuedTitle") : t("widgetSuccessTitle"));
+    onComplete?.(payload);
   };
 
   const getPrewrittenHelpForCode = (code: string): string => {
@@ -971,7 +1375,7 @@ export function MezgebWidget({
       currentQuestion,
       lang,
       errors: errors.map((err) => ({ fieldId: err.fieldId, code: err.code, message: err.message })),
-      buttonNames: [t("widgetBack"), isReviewStep ? t("widgetConfirm") : t("widgetContinue")],
+      buttonNames: [t("widgetBack"), isReviewStep ? t("widgetConfirm") : t("widgetSaveContinue")],
       reviewTitle: t("widgetReviewTitle"),
     });
 
@@ -1002,7 +1406,10 @@ export function MezgebWidget({
   const handleSimplifyQuestion = async () => {
     if (!currentQuestion) return;
     if (!canSimplifyAi) {
-      setSimplifiedInfo({ usedAi: false, text: currentQuestion.hint?.[lang] ?? currentQuestion.label[lang] });
+      setSimplifiedInfo({
+        usedAi: false,
+        text: currentQuestion.hint?.[lang] ?? currentQuestion.label[lang],
+      });
       return;
     }
     setSimplifying(true);
@@ -1036,12 +1443,14 @@ export function MezgebWidget({
       safeRemoveStorage(storageKey);
     }
     setCompletedState(null);
-    setNextScreenState(null);
     setStepIndex(0);
+    setStage(useIntroScreens ? "welcome" : "questions");
     setResumePromptStep(null);
+    setOutboxBannerState("idle");
     setDeviceClearedNotice(false);
     setPendingSuggestedSkills([]);
     setShowSkillsFallback(false);
+    setSmsGeneratedLink(null);
     setAnswers(createEmptyAnswers(lang, safeTemplate.partnerDefault));
     onReset?.();
   };
@@ -1055,168 +1464,399 @@ export function MezgebWidget({
     }
     setSmsPhoneError("");
     const resumeId = Math.random().toString(36).slice(2, 10);
-    const sanitized = stripSupportFromAnswers({ ...answers, phone: normalizePhoneDigits(candidatePhone) });
+    const sanitized = stripSupportFromAnswers({
+      ...answers,
+      phone: normalizePhoneDigits(candidatePhone),
+    });
     if (!ephemeralPreview) {
       safeSetStorage(`mezgeb_resume_${resumeId}`, JSON.stringify({ stepIndex, answers: sanitized }));
     }
     setSmsGeneratedLink(`${window.location.origin}/demo?resume=${resumeId}`);
   };
 
+  const handleOpenSavedLink = (e: React.FormEvent) => {
+    e.preventDefault();
+    const raw = resumeLinkValue.trim();
+    const match = raw.match(/resume=([a-zA-Z0-9_-]+)/);
+    const id = match ? match[1] : raw;
+    if (!id) {
+      setResumeError(t("errRequired"));
+      return;
+    }
+    const stored = safeGetStorage(`mezgeb_resume_${id}`).value;
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed.stepIndex === "number" && parsed.answers) {
+          setAnswers((prev) => ({ ...prev, ...parsed.answers }));
+          setStepIndex(Math.min(parsed.stepIndex, totalSteps - 1));
+          setResumePromptStep(parsed.stepIndex + 1);
+          setResumeError("");
+          setResumeLinkInputOpen(false);
+          setStage("questions");
+          return;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    setResumeError("");
+    setResumeLinkInputOpen(false);
+    setStage("questions");
+  };
+
+  const rootClasses = `mezgeb-surface rounded-[16px] border border-[var(--line)] bg-[var(--paper)] text-[var(--ink)] text-[1.125rem] leading-[1.6] ${
+    highContrast ? "mezgeb-hc" : ""
+  }`;
+  const rootStyle = {
+    "--widget-accent": highContrast ? "#000000" : effectiveAccent,
+  } as React.CSSProperties;
+
   if (!validation.valid && safeTemplate.questions.length === 0) {
     return (
-      <div role="alert" className="mezgeb-card p-6 border-red-300 bg-red-50 text-red-900 space-y-2">
-        <p className="font-semibold">{t("templatesValidationErrorsTitle")}</p>
-        <ul className="list-disc pl-5 text-sm">
-          {validation.errors.map((err, i) => (
-            <li key={i}>{err}</li>
-          ))}
-        </ul>
-      </div>
-    );
-  }
-
-  // C6: "What happens next" screen after confirm, before final token/success details
-  if (nextScreenState) {
-    return (
-      <div className="mezgeb-card p-6 md:p-8 space-y-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="w-11 h-11 rounded-full bg-[#E4F2EC] text-[#1F5C46] flex items-center justify-center shrink-0">
-              <CheckIcon size={22} />
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-bold text-[#111111]">{t("widgetNextScreenTitle")}</h2>
-              <p className="text-base text-[#6B6B6B] leading-relaxed">{t("widgetNextScreenBody")}</p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => speakText(`${t("widgetNextScreenTitle")} ${t("widgetNextScreenBody")}`, lang)}
-            className="inline-flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg border border-[#E7E7E4] bg-white text-xs font-medium text-[#111111]"
-          >
-            <VolumeIcon size={15} />
-            <span>{speaking ? t("widgetStopReading") : t("widgetReadAloud")}</span>
-          </button>
+      <div className={rootClasses} style={rootStyle}>
+        <div className="p-6">
+          <Banner variant="error" role="alert">
+            <p className="font-semibold">{t("templatesValidationErrorsTitle")}</p>
+            <ul className="list-disc pl-5 mt-1 text-sm">
+              {validation.errors.map((err, i) => (
+                <li key={i}>{err}</li>
+              ))}
+            </ul>
+          </Banner>
         </div>
-
-        <button
-          type="button"
-          onClick={() => {
-            const done = nextScreenState;
-            setNextScreenState(null);
-            setCompletedState(done);
-            announce(done.queuedOffline ? t("widgetOfflineQueuedTitle") : t("widgetSuccessTitle"));
-            onComplete?.(done);
-          }}
-          className="mezgeb-btn-primary"
-        >
-          {t("widgetNextScreenContinue")}
-        </button>
       </div>
     );
   }
 
+  // ============================================================================
+  // DONE SCREEN
+  // ============================================================================
   if (completedState) {
+    const learnerName = String(completedState.profile.name ?? "");
     return (
-      <div className="mezgeb-card p-6 md:p-8 space-y-6">
-        <div className="flex items-start gap-4">
-          <div className="w-11 h-11 rounded-full bg-[#E4F2EC] text-[#1F5C46] flex items-center justify-center shrink-0">
-            <CheckIcon size={22} />
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-2xl font-bold text-[#111111]">
-              {completedState.queuedOffline ? t("widgetOfflineQueuedTitle") : t("widgetSuccessTitle")}
-            </h2>
-            <p className="text-[#6B6B6B] text-base leading-relaxed">{t("widgetSuccessBody")}</p>
+      <div className={rootClasses} style={rootStyle}>
+        <div className="p-5 sm:p-6 space-y-5 text-left">
+          <Banner variant="success">
+            <div className="space-y-1">
+              <p className="font-semibold text-base">
+                {completedState.queuedOffline
+                  ? t("widgetOfflineQueuedTitle")
+                  : t("widgetSuccessTitle")}
+              </p>
+              {learnerName && (
+                <p className="text-sm font-medium text-[var(--ink)]">{learnerName}</p>
+              )}
+            </div>
+          </Banner>
+
+          <p className="text-base text-[var(--ink)] leading-relaxed">{t("widgetSuccessBody")}</p>
+
+          {!completedState.queuedOffline && (
+            <div className="p-4 rounded-[10px] bg-[var(--stone)] border border-[var(--line)] text-sm space-y-1">
+              <p className="text-[var(--muted)]">{t("widgetSuccessTokenNote")}</p>
+              <code
+                className="text-[var(--ink)] font-medium block break-all"
+                style={{ fontFamily: "var(--font-mono)" }}
+              >
+                {completedState.token}
+              </code>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3 pt-2">
+            {effectiveSettings.smsResume && (
+              <Button
+                variant="secondary"
+                size="lg"
+                onClick={() => {
+                  setSmsPhone(String(answers.phone ?? ""));
+                  setSmsOpen((v) => !v);
+                }}
+              >
+                {t("widgetDoneGetLink")}
+              </Button>
+            )}
+            <Button variant="primary" size="lg" onClick={handleRestart}>
+              {t("widgetSuccessRestart")}
+            </Button>
           </div>
         </div>
-
-        {!completedState.queuedOffline && (
-          <div className="p-4 rounded-xl bg-[#F5F5F3] border border-[#E7E7E4] text-sm">
-            <p className="text-[#6B6B6B] mb-1">{t("widgetSuccessTokenNote")}</p>
-            <code className="font-mono text-[#111111] font-medium">{completedState.token}</code>
-          </div>
-        )}
-
-        <button type="button" onClick={handleRestart} className="mezgeb-btn-secondary">
-          {t("widgetSuccessRestart")}
-        </button>
       </div>
     );
   }
 
-  const progressPct = Math.round(((stepIndex + 1) / totalSteps) * 100);
+  // ============================================================================
+  // STAGE 1: WELCOME SCREEN
+  // ============================================================================
+  if (stage === "welcome") {
+    return (
+      <div className={rootClasses} style={rootStyle}>
+        <div className="p-5 sm:p-6 space-y-6 text-left">
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-[var(--muted)]">{effectivePlatformName}</p>
+            <h2
+              ref={questionHeadingRef}
+              tabIndex={-1}
+              className="text-[1.5rem] font-semibold text-[var(--ink)] outline-none"
+            >
+              {t("widgetWelcomeTitle")}
+            </h2>
+            <ul className="space-y-2 text-base text-[var(--ink-2)] pt-1">
+              <li>{t("widgetWelcomeLine1")}</li>
+              <li>{t("widgetWelcomeLine2")}</li>
+              <li>{t("widgetWelcomeLine3")}</li>
+            </ul>
+          </div>
+
+          <ChoiceList
+            name={`${widgetId}-welcome-lang`}
+            legend={t("widgetWelcomeLangHeading")}
+            hideLegend={false}
+            mode="single"
+            value={lang}
+            onChange={(val) => {
+              const nextLang = val === "am" ? "am" : "en";
+              setLang(nextLang);
+              updateAnswer("language", nextLang);
+            }}
+            options={[
+              { value: "am", title: "አማርኛ", lang: "am" },
+              { value: "en", title: "English", lang: "en" },
+            ]}
+          />
+
+          <div className="space-y-3 pt-2">
+            <Button
+              variant="primary"
+              size="lg"
+              fullWidth
+              onClick={() => {
+                setStage("mode");
+                window.setTimeout(() => questionHeadingRef.current?.focus(), 20);
+              }}
+            >
+              {t("widgetWelcomeStart")}
+            </Button>
+
+            <Button
+              variant="quiet"
+              size="md"
+              onClick={() => setResumeLinkInputOpen((v) => !v)}
+            >
+              {t("widgetWelcomeHaveLink")}
+            </Button>
+          </div>
+
+          {resumeLinkInputOpen && (
+            <form
+              onSubmit={handleOpenSavedLink}
+              className="p-4 rounded-[10px] border border-[var(--line)] bg-[var(--stone)] space-y-3"
+            >
+              <Field
+                label={t("widgetWelcomeResumePrompt")}
+                error={resumeError}
+                inputProps={{
+                  type: "text",
+                  value: resumeLinkValue,
+                  onChange: (e) => setResumeLinkValue(e.target.value),
+                }}
+              />
+              <Button type="submit" variant="secondary" size="md">
+                {t("widgetWelcomeResumeOpen")}
+              </Button>
+            </form>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // STAGE 2: ANSWER MODE SELECTOR
+  // ============================================================================
+  if (stage === "mode") {
+    return (
+      <div className={rootClasses} style={rootStyle}>
+        <div className="p-5 sm:p-6 space-y-6 text-left">
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium text-[var(--muted)]">{effectivePlatformName}</p>
+            <h2
+              ref={questionHeadingRef}
+              tabIndex={-1}
+              className="text-[1.5rem] font-semibold text-[var(--ink)] outline-none"
+            >
+              {t("widgetModeHeading")}
+            </h2>
+            <p className="text-sm text-[var(--muted)]">{t("widgetModeHint")}</p>
+          </div>
+
+          <ChoiceList
+            name={`${widgetId}-answer-mode`}
+            legend={t("widgetModeHeading")}
+            mode="single"
+            value={answerMode}
+            onChange={(val) => setAnswerMode(val as AnswerMode)}
+            options={[
+              {
+                value: "speak",
+                title: t("widgetModeSpeakTitle"),
+                description: t("widgetModeSpeakDesc"),
+                icon: <Mic size={24} strokeWidth={1.75} />,
+              },
+              {
+                value: "type",
+                title: t("widgetModeTypeTitle"),
+                description: t("widgetModeTypeDesc"),
+                icon: <Type size={24} strokeWidth={1.75} />,
+              },
+              {
+                value: "simple",
+                title: t("widgetModeSimpleTitle"),
+                description: t("widgetModeSimpleDesc"),
+                icon: <Users size={24} strokeWidth={1.75} />,
+              },
+            ]}
+          />
+
+          <div className="grid grid-cols-3 gap-3 pt-2 border-t border-[var(--line)]">
+            <Button
+              variant="secondary"
+              size="lg"
+              fullWidth
+              onClick={() => setStage("welcome")}
+            >
+              {t("widgetBack")}
+            </Button>
+            <div className="col-span-2">
+              <Button
+                variant="primary"
+                size="lg"
+                fullWidth
+                onClick={() => {
+                  setStage("questions");
+                  focusNewQuestionHeading(stepIndex + 1);
+                }}
+              >
+                {t("widgetSaveContinue")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // STAGE 3: QUESTION / REVIEW SCREENS
+  // ============================================================================
   const currentErrorMap = new Map(errors.map((e) => [e.fieldId, e.message]));
 
-  // Date validation & live equivalent display ONLY when valid complete date is entered (A3, B8)
   const ethBounds = getAllowedYearBounds("eth");
   const gregBounds = getAllowedYearBounds("greg");
+  const ethYearOptions = Array.from(
+    { length: ethBounds.max - ethBounds.min + 1 },
+    (_, i) => ethBounds.max - i
+  );
+  const gregYearOptions = Array.from(
+    { length: gregBounds.max - gregBounds.min + 1 },
+    (_, i) => gregBounds.max - i
+  );
 
   const ethDayNum = Number(String(answers.dob_eth_day ?? "").trim());
   const ethMonthNum = Number(String(answers.dob_eth_month ?? "").trim());
   const ethYearNum = Number(String(answers.dob_eth_year ?? "").trim());
+  const maxEthDays =
+    ethYearNum && ethMonthNum ? daysInEthiopianMonth(ethYearNum, ethMonthNum) : 30;
   const gregConverted =
-    String(answers.dob_eth_year ?? "").trim().length === 4 &&
-    isValidEthiopianDate(ethYearNum, ethMonthNum, ethDayNum)
+    ethYearNum > 0 && ethMonthNum > 0 && ethDayNum > 0 && isValidEthiopianDate(ethYearNum, ethMonthNum, ethDayNum)
       ? ethiopianToGregorian({ year: ethYearNum, month: ethMonthNum, day: ethDayNum })
       : null;
 
   const gregDayNum = Number(String(answers.dob_greg_day ?? "").trim());
   const gregMonthNum = Number(String(answers.dob_greg_month ?? "").trim());
   const gregYearNum = Number(String(answers.dob_greg_year ?? "").trim());
+  const maxGregDays =
+    gregYearNum && gregMonthNum ? daysInGregorianMonth(gregYearNum, gregMonthNum) : 31;
   const ethConverted =
-    String(answers.dob_greg_year ?? "").trim().length === 4 &&
-    isValidGregorianDate(gregYearNum, gregMonthNum, gregDayNum)
+    gregYearNum > 0 && gregMonthNum > 0 && gregDayNum > 0 && isValidGregorianDate(gregYearNum, gregMonthNum, gregDayNum)
       ? gregorianToEthiopian({ year: gregYearNum, month: gregMonthNum, day: gregDayNum })
       : null;
 
-  const primaryLabel = currentQuestion ? currentQuestion.label[lang] : t("widgetReviewTitle");
-  const secondaryLang: Lang = lang === "en" ? "am" : "en";
-  const secondaryLabel = currentQuestion ? currentQuestion.label[secondaryLang] : undefined;
+  const isSimpleMode = answerMode === "simple";
+  const primaryLabel = currentQuestion
+    ? isSimpleMode
+      ? currentQuestion.hint?.[lang] || currentQuestion.label[lang]
+      : currentQuestion.label[lang]
+    : t("widgetReviewTitle");
 
   const prewrittenHelp = errors[0]
     ? getPrewrittenHelpForCode(errors[0].code)
     : getPrewrittenHelpForCurrentType();
   const helpTarget = getDefaultTargetField();
 
-  const renderSpeakChoiceButton = (q: TemplateQuestion, isMulti?: boolean) => {
-    if (!canVoice || q.allowVoice === false || readOnly || !q.options) return null;
-    const opts = q.options.map((o) => ({ value: o.value, label: o.label[lang] }));
+  const exampleAnswer =
+    currentQuestion?.type === "phone"
+      ? "091 234 5678"
+      : currentQuestion?.type === "date"
+        ? lang === "am"
+          ? "12 መስከረም 1990"
+          : "22 September 1997"
+        : lang === "am"
+          ? "ሐና ተስፋዬ"
+          : "Hana Tesfaye";
+
+  const renderVoiceControlForQuestion = (q: TemplateQuestion, isMulti?: boolean) => {
+    if (!canVoice || q.allowVoice === false || readOnly) return null;
+    const opts = q.options?.map((o) => ({ value: o.value, label: o.label[lang] }));
+    const isThisTranscript = pendingTranscript && pendingTranscript.fieldKey === q.id;
+
     return (
       <div className="space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          {!recording ? (
-            <button
-              type="button"
-              disabled={sendingVoice}
-              onClick={() => startVoiceRecording(q.id, q.label[lang], q.type, opts, isMulti)}
-              className="inline-flex items-center gap-2 px-3.5 min-h-[40px] rounded-lg bg-[#111111] text-white text-xs font-medium"
-            >
-              <MicIcon size={14} />
-              <span>{sendingVoice ? t("widgetSendingVoice") : t("widgetSpeakChoiceBtn")}</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={stopVoiceRecording}
-              className="inline-flex items-center gap-2 px-3.5 min-h-[40px] rounded-lg bg-[#6A4FC4] text-white text-xs font-medium"
-            >
-              <span>{t("widgetStopRecording")}</span>
-              <span className="font-mono">{t("widgetRecordingStatus", { seconds: recordSeconds })}</span>
-            </button>
-          )}
-          <span className="text-xs text-[#6B6B6B]">{t("cloudAiNotice")}</span>
-        </div>
+        <VoiceButton
+          widgetSize
+          state={isThisTranscript ? "review" : voiceUiState}
+          seconds={recordSeconds}
+          transcript={pendingTranscript?.value ?? ""}
+          onTranscriptChange={(val) =>
+            pendingTranscript && setPendingTranscript({ ...pendingTranscript, value: val })
+          }
+          onStart={() =>
+            startVoiceRecording(q.id, q.label[lang], q.type, opts, isMulti)
+          }
+          onStop={stopVoiceRecording}
+          onKeep={() => {
+            if (pendingTranscript) {
+              updateAnswer(q.id, pendingTranscript.value);
+              setPendingTranscript(null);
+              setVoiceUiState("idle");
+            }
+          }}
+          onRetry={() => {
+            setPendingTranscript(null);
+            setVoiceUiState("idle");
+            startVoiceRecording(q.id, q.label[lang], q.type, opts, isMulti);
+          }}
+          labels={{
+            speakLabel: t("widgetSpeakAnswerLabel"),
+            listeningLabel: t("widgetVoiceListeningLabel"),
+            processingLabel: t("widgetVoiceProcessingLabel"),
+            keepLabel: t("widgetVoiceKeepBtn"),
+            tryAgainLabel: t("widgetVoiceTryAgainBtn"),
+            failedMessage: t("widgetVoiceFailedMsg"),
+            transcriptLabel: t("widgetTranscriptConfirmTitle"),
+          }}
+        />
 
         {pendingChoiceMatch && pendingChoiceMatch.fieldKey === q.id && (
-          <div className="p-3 rounded-xl bg-[#EEEBF8] border border-[#8F6FE0] flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm font-medium text-[#111111]">
+          <div className="p-3.5 rounded-[10px] border-2 border-[var(--accent)] bg-[var(--lilac)] flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm font-medium text-[var(--ink)]">
               {t("widgetVoiceChoiceConfirm", { option: pendingChoiceMatch.matchedLabel })}
             </p>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
+              <Button
+                variant="primary"
+                size="md"
                 onClick={() => {
                   if (pendingChoiceMatch.isMulti) {
                     const prev = Array.isArray(answers[q.id]) ? (answers[q.id] as string[]) : [];
@@ -1225,23 +1865,26 @@ export function MezgebWidget({
                     }
                   } else {
                     updateAnswer(q.id, pendingChoiceMatch.matchedValue);
-                    if (q.id === "language" && (pendingChoiceMatch.matchedValue === "am" || pendingChoiceMatch.matchedValue === "en")) {
+                    if (
+                      q.id === "language" &&
+                      (pendingChoiceMatch.matchedValue === "am" ||
+                        pendingChoiceMatch.matchedValue === "en")
+                    ) {
                       setLang(pendingChoiceMatch.matchedValue);
                     }
                   }
                   setPendingChoiceMatch(null);
                 }}
-                className="px-3 min-h-[36px] rounded-lg bg-[#111111] text-white text-xs font-semibold"
               >
-                {t("yesButton")}
-              </button>
-              <button
-                type="button"
+                {t("widgetVoiceKeepBtn")}
+              </Button>
+              <Button
+                variant="secondary"
+                size="md"
                 onClick={() => setPendingChoiceMatch(null)}
-                className="px-3 min-h-[36px] rounded-lg bg-white border border-[#E7E7E4] text-xs font-semibold"
               >
-                {t("noButton")}
-              </button>
+                {t("widgetVoiceTryAgainBtn")}
+              </Button>
             </div>
           </div>
         )}
@@ -1250,80 +1893,331 @@ export function MezgebWidget({
   };
 
   return (
-    <div className="mezgeb-card p-5 sm:p-7 md:p-8 space-y-6">
-      {/* Offline banner */}
-      {offline && (
-        <div role="status" className="p-3.5 rounded-xl bg-[#F9F3EA] border border-[#E7E7E4] text-sm text-[#111111]">
-          {t("widgetOfflineNotice")}
-        </div>
-      )}
+    <div ref={rootRef} className={rootClasses} style={rootStyle}>
+      <div className="p-5 sm:p-6 space-y-5 text-left">
+        {/* Assisted partner mode banner */}
+        {assistedMode && (
+          <Banner variant="info">
+            {t("widgetAssistedBanner", { name: assistedLearnerName })}
+          </Banner>
+        )}
 
-      {/* Partner joined live banner */}
-      {partnerJoinedLive && (
-        <div role="status" className="p-3.5 rounded-xl bg-[#E4F2EC] text-[#1F5C46] text-sm font-medium">
-          {t("widgetPartnerJoinedBanner")}
-        </div>
-      )}
+        {/* Offline / Outbox / Restored banners */}
+        {offline && (
+          <Banner variant="warning">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>{t("widgetOfflineBanner")}</span>
+              {outboxCount > 0 && (
+                <Badge variant="warning">
+                  {t("outboxPendingCount", { count: outboxCount })}
+                </Badge>
+              )}
+            </div>
+          </Banner>
+        )}
 
-      {storageBlocked && !offline && (
-        <div role="status" className="text-xs text-[#6B6B6B]">
-          {t("demoStorageBlockedNote")}
-        </div>
-      )}
+        {outboxBannerState === "sending" && (
+          <Banner variant="info">
+            {t("widgetOutboxSendingBanner", { count: Math.max(1, outboxCount || 3) })}
+          </Banner>
+        )}
 
-      {/* Resume prompt */}
-      {resumePromptStep !== null && !readOnly && !singleQuestionMode && (
-        <div className="p-4 rounded-xl bg-[#E4F2EC] text-[#1F5C46] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <p className="text-sm font-medium">{t("widgetResumeBanner", { step: resumePromptStep })}</p>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => setResumePromptStep(null)}
-              className="px-3 min-h-[38px] rounded-lg bg-[#1F5C46] text-white text-xs font-semibold"
-            >
-              {t("widgetResumeBtn", { step: resumePromptStep })}
-            </button>
-            <button
-              type="button"
-              onClick={handleRestart}
-              className="px-3 min-h-[38px] rounded-lg bg-white text-[#111111] border border-[#E7E7E4] text-xs font-semibold"
-            >
-              {t("widgetStartFreshBtn")}
-            </button>
-          </div>
-        </div>
-      )}
+        {partnerJoinedLive && (
+          <Banner variant="success">{t("widgetPartnerJoinedBanner")}</Banner>
+        )}
 
-      {/* Conditional rule notice when previewing a hidden question */}
-      {hiddenRuleNotice && (
-        <div role="status" className="p-3 rounded-xl bg-[#F9F3EA] border border-[#E7E7E4] text-xs font-medium text-[#111111]">
-          {t("widgetHiddenByRule")}
-        </div>
-      )}
+        {storageBlocked && !offline && (
+          <p role="status" className="text-xs text-[var(--muted)]">
+            {t("demoStorageBlockedNote")}
+          </p>
+        )}
 
-      {/* Top progress header — Help button ALWAYS visible (A2) */}
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-sm font-medium text-[#6B6B6B]">
-            <span>{effectivePlatformName}</span>
+        {resumePromptStep !== null && !readOnly && !singleQuestionMode && (
+          <Banner
+            variant="info"
+            action={
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" size="md" onClick={() => setResumePromptStep(null)}>
+                  {t("widgetResumeBtn", { step: resumePromptStep })}
+                </Button>
+                <Button variant="quiet" size="md" onClick={handleRestart}>
+                  {t("widgetStartFreshBtn")}
+                </Button>
+              </div>
+            }
+          >
+            {t("widgetSessionRestored", { step: resumePromptStep })}
+          </Banner>
+        )}
+
+        {hiddenRuleNotice && (
+          <Banner variant="info">{t("widgetHiddenByRule")}</Banner>
+        )}
+
+        {/* Top bar: platform + Answer Mode switcher + Progress */}
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-medium text-[var(--ink)]">{effectivePlatformName}</span>
+
             {!singleQuestionMode && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>{t("widgetStepOf", { current: stepIndex + 1, total: totalSteps })}</span>
-              </>
+              <div className="flex items-center gap-2">
+                <label htmlFor={`${widgetId}-mode-select`} className="sr-only">
+                  {t("widgetModeSwitchLabel")}
+                </label>
+                <select
+                  id={`${widgetId}-mode-select`}
+                  value={answerMode}
+                  onChange={(e) => setAnswerMode(e.target.value as AnswerMode)}
+                  className="min-h-[36px] px-2.5 rounded-[6px] border border-[var(--line-strong)] bg-[var(--paper)] text-xs font-medium text-[var(--ink)]"
+                >
+                  <option value="speak">{t("widgetModeSpeakTitle")}</option>
+                  <option value="type">{t("widgetModeTypeTitle")}</option>
+                  <option value="simple">{t("widgetModeSimpleTitle")}</option>
+                </select>
+              </div>
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {effectiveSettings.readAloud && (
-              <button
-                type="button"
-                onClick={handleReadCurrentStep}
-                className="inline-flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg border border-[#E7E7E4] bg-white text-xs font-medium text-[#111111] hover:bg-[#F5F5F3]"
+          {builderCanvas ? (
+            <Progress
+              current={builderCanvas.questionPosition}
+              total={builderCanvas.questionTotal}
+              label={builderCanvas.labels.progressLabel}
+            />
+          ) : (
+            !singleQuestionMode && (
+              <Progress
+                current={stepIndex + 1}
+                total={totalSteps}
+                label={t("widgetStepOf", { current: stepIndex + 1, total: totalSteps })}
+              />
+            )
+          )}
+        </div>
+
+        {noAmharicVoiceNote && (
+          <div className="p-3 rounded-[10px] border border-[var(--line)] bg-[var(--stone)] flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--muted)]">
+            <span>{t("widgetNoAmharicVoice")}</span>
+            <Button type="button" variant="secondary" size="md" onClick={handleReadEnglishFallback}>
+              {t("widgetReadEnglishBtn")}
+            </Button>
+          </div>
+        )}
+
+        {/* Error Summary */}
+        {errors.length > 0 && (
+          <div
+            ref={errorSummaryRef}
+            tabIndex={-1}
+            role="alert"
+            className="p-4 rounded-[10px] border-2 border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)] space-y-2 outline-none"
+          >
+            <p className="text-sm font-semibold">{t("widgetErrorSummaryTitle")}</p>
+            <ul className="list-disc pl-5 text-sm space-y-1">
+              {errors.map((err, i) => (
+                <li key={i}>
+                  <a
+                    href={`#${err.fieldId}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      byId(err.fieldId)?.focus();
+                    }}
+                    className="underline font-medium text-[var(--error)]"
+                  >
+                    {err.message}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Question Heading + Read Aloud + Help (consistent placement on every screen) */}
+        <div className="space-y-4">
+          <div className="flex items-start gap-4">
+            {currentQuestion && isSimpleMode && (
+              <div
+                className="w-20 h-20 rounded-[10px] border border-[var(--line)] bg-[var(--stone)] flex items-center justify-center shrink-0 text-[var(--ink)]"
+                aria-hidden="true"
               >
-                <VolumeIcon size={15} />
-                <span>{speaking ? t("widgetStopReading") : t("widgetReadAloud")}</span>
-              </button>
+                <QuestionIcon name={currentQuestion.icon} size={64} />
+              </div>
+            )}
+
+            <div className="space-y-2 flex-1 min-w-0">
+              {builderCanvas && currentQuestion ? (
+                <>
+                  {/* Question text inline editor */}
+                  <div className="space-y-1">
+                    {lang === "am" &&
+                      !currentQuestion.label.am.trim() &&
+                      currentQuestion.label.en.trim() && (
+                        <p className="text-xs text-[var(--muted)]">
+                          {builderCanvas.labels.englishReference(currentQuestion.label.en)}
+                        </p>
+                      )}
+                    <div className="flex items-start gap-1.5">
+                      <div className="flex-1 min-w-0">
+                        {editingCanvasField === "label" ? (
+                          <textarea
+                            ref={canvasLabelInputRef}
+                            rows={2}
+                            aria-label={builderCanvas.labels.editQuestionLabelAria}
+                            value={currentQuestion.label[lang] ?? ""}
+                            onChange={(e) => builderCanvas.onUpdateLabel(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                setEditingCanvasField(null);
+                                window.setTimeout(() => canvasLabelBtnRef.current?.focus(), 0);
+                              } else if (e.key === "Escape") {
+                                e.preventDefault();
+                                builderCanvas.onUpdateLabel(canvasDraftValue);
+                                setEditingCanvasField(null);
+                                window.setTimeout(() => canvasLabelBtnRef.current?.focus(), 0);
+                              }
+                            }}
+                            onBlur={() => setEditingCanvasField(null)}
+                            className="w-full rounded-[6px] px-1.5 py-1 -mx-1.5 bg-[var(--paper)] text-[1.375rem] sm:text-[1.75rem] font-semibold text-[var(--ink)] leading-[1.2] outline-2 outline-[var(--accent)] border-0 resize-none"
+                          />
+                        ) : (
+                          <button
+                            ref={canvasLabelBtnRef}
+                            type="button"
+                            aria-label={builderCanvas.labels.editQuestionLabelAria}
+                            onClick={() => {
+                              setCanvasDraftValue(currentQuestion.label[lang] ?? "");
+                              setEditingCanvasField("label");
+                              window.setTimeout(() => canvasLabelInputRef.current?.focus(), 0);
+                            }}
+                            className="w-full text-left rounded-[6px] px-1.5 py-0.5 -mx-1.5 border border-transparent hover:border-dashed hover:border-[var(--line-strong)] cursor-text text-[1.375rem] sm:text-[1.75rem] font-semibold text-[var(--ink)] leading-[1.2]"
+                          >
+                            {currentQuestion.label[lang]?.trim() ? (
+                              currentQuestion.label[lang]
+                            ) : (
+                              <span className="text-[var(--muted)] font-normal">
+                                {currentQuestion.label.en || builderCanvas.labels.editQuestionLabelAria}
+                              </span>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                      {builderCanvas.renderLabelActions && (
+                        <div className="shrink-0 pt-0.5">{builderCanvas.renderLabelActions}</div>
+                      )}
+                    </div>
+
+                    {editingCanvasField === "label" &&
+                      (currentQuestion.label[lang]?.length ?? 0) > 60 && (
+                        <p role="status" className="text-xs text-[var(--warn)]">
+                          {builderCanvas.labels.charsWarning(currentQuestion.label[lang].length)}
+                        </p>
+                      )}
+                    {builderCanvas.renderAfterLabel}
+                  </div>
+
+                  {/* Hint inline editor */}
+                  {!isSimpleMode && (
+                    <div className="space-y-1">
+                      {lang === "am" &&
+                        !currentQuestion.hint?.am?.trim() &&
+                        currentQuestion.hint?.en?.trim() && (
+                          <p className="text-xs text-[var(--muted)]">
+                            {builderCanvas.labels.englishReference(currentQuestion.hint.en)}
+                          </p>
+                        )}
+                      <div className="flex items-start gap-1.5">
+                        <div className="flex-1 min-w-0">
+                          {editingCanvasField === "hint" ? (
+                            <textarea
+                              ref={canvasHintInputRef}
+                              rows={2}
+                              aria-label={builderCanvas.labels.editHintAria}
+                              value={currentQuestion.hint?.[lang] ?? ""}
+                              onChange={(e) => builderCanvas.onUpdateHint(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && !e.shiftKey) {
+                                  e.preventDefault();
+                                  setEditingCanvasField(null);
+                                  window.setTimeout(() => canvasHintBtnRef.current?.focus(), 0);
+                                } else if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  builderCanvas.onUpdateHint(canvasDraftValue);
+                                  setEditingCanvasField(null);
+                                  window.setTimeout(() => canvasHintBtnRef.current?.focus(), 0);
+                                }
+                              }}
+                              onBlur={() => setEditingCanvasField(null)}
+                              className="w-full rounded-[6px] px-1.5 py-1 -mx-1.5 bg-[var(--paper)] text-sm text-[var(--ink)] leading-relaxed outline-2 outline-[var(--accent)] border-0 resize-none"
+                            />
+                          ) : (
+                            <button
+                              ref={canvasHintBtnRef}
+                              type="button"
+                              aria-label={
+                                currentQuestion.hint?.[lang]?.trim()
+                                  ? builderCanvas.labels.editHintAria
+                                  : builderCanvas.labels.addHintBtn
+                              }
+                              onClick={() => {
+                                setCanvasDraftValue(currentQuestion.hint?.[lang] ?? "");
+                                setEditingCanvasField("hint");
+                                window.setTimeout(() => canvasHintInputRef.current?.focus(), 0);
+                              }}
+                              className="w-full text-left rounded-[6px] px-1.5 py-0.5 -mx-1.5 border border-transparent hover:border-dashed hover:border-[var(--line-strong)] cursor-text text-sm text-[var(--muted)] leading-relaxed"
+                            >
+                              {currentQuestion.hint?.[lang]?.trim()
+                                ? currentQuestion.hint[lang]
+                                : builderCanvas.labels.addHintBtn}
+                            </button>
+                          )}
+                        </div>
+                        {builderCanvas.renderHintActions && (
+                          <div className="shrink-0">{builderCanvas.renderHintActions}</div>
+                        )}
+                      </div>
+                      {builderCanvas.renderAfterHint}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <h2
+                    ref={questionHeadingRef}
+                    tabIndex={-1}
+                    className="text-[1.375rem] sm:text-[1.75rem] font-semibold text-[var(--ink)] leading-[1.2] outline-none"
+                  >
+                    {primaryLabel}
+                  </h2>
+                  {currentQuestion?.hint?.[lang] && !isSimpleMode && (
+                    <p className="text-sm text-[var(--muted)] leading-relaxed">
+                      {currentQuestion.hint[lang]}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            {effectiveSettings.readAloud && (
+              <ReadAloudButton
+                widgetSize
+                text={primaryLabel}
+                lang={lang}
+                audioUrl={currentQuestion?.audio?.[lang]}
+                serverReadAloud={serverReadAloudForLang}
+                speaking={speaking}
+                label={builderCanvas ? builderCanvas.labels.readAloudLabel : t("widgetReadAloud")}
+                stopLabel={t("widgetStopReading")}
+                onToggle={() =>
+                  speakText(
+                    `${primaryLabel}. ${currentQuestion?.hint?.[lang] ?? ""}`,
+                    lang,
+                    currentQuestion?.audio?.[lang]
+                  )
+                }
+              />
             )}
 
             <button
@@ -1331,1426 +2225,1499 @@ export function MezgebWidget({
               type="button"
               onClick={() => setHelpOpen((prev) => !prev)}
               aria-expanded={helpOpen}
-              className="inline-flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg border border-[#E7E7E4] bg-white text-xs font-medium text-[#111111] hover:bg-[#F5F5F3]"
+              className="mezgeb-transition inline-flex items-center gap-2 min-h-[44px] px-3.5 rounded-[10px] border border-[var(--line-strong)] bg-[var(--paper)] text-sm font-medium text-[var(--ink)] hover:bg-[var(--stone)] cursor-pointer"
             >
-              <HelpCircleIcon size={15} />
-              <span>{t("widgetHelpBtn")}</span>
+              <HelpCircle size={20} strokeWidth={1.75} aria-hidden="true" />
+              <span>{builderCanvas ? builderCanvas.labels.helpLabel : t("widgetHelpBtn")}</span>
             </button>
-          </div>
-        </div>
 
-        {!singleQuestionMode && (
-          <div
-            className="w-full h-1.5 bg-[#E7E7E4] rounded-full overflow-hidden"
-            role="progressbar"
-            aria-valuenow={stepIndex + 1}
-            aria-valuemin={1}
-            aria-valuemax={totalSteps}
-          >
-            <div
-              className="h-full transition-all duration-200"
-              style={{ width: `${progressPct}%`, backgroundColor: effectiveAccent }}
-            />
-          </div>
-        )}
-
-        {noAmharicVoiceNote && (
-          <div className="p-3 rounded-lg bg-[#F5F5F3] flex flex-wrap items-center justify-between gap-2 text-xs text-[#6B6B6B]">
-            <span>{t("widgetNoAmharicVoice")}</span>
-            <button
-              type="button"
-              onClick={handleReadEnglishFallback}
-              className="px-2.5 min-h-[32px] rounded-md border border-[#E7E7E4] bg-white text-[#111111] font-medium"
-            >
-              {t("widgetReadEnglishBtn")}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Error Summary */}
-      {errors.length > 0 && (
-        <div
-          ref={errorSummaryRef}
-          tabIndex={-1}
-          role="alert"
-          className="p-4 rounded-xl border border-red-300 bg-red-50 text-red-900 space-y-2 outline-none"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-semibold">{t("widgetErrorSummaryTitle")}</p>
-            <button
-              type="button"
-              onClick={() => speakText(errors.map((e) => e.message).join(". "), lang)}
-              className="inline-flex items-center gap-1 px-2.5 min-h-[32px] rounded-md border border-red-300 bg-white text-xs font-medium text-red-900"
-            >
-              <VolumeIcon size={13} />
-              <span>{t("widgetReadAloud")}</span>
-            </button>
-          </div>
-          <ul className="list-disc pl-5 text-sm space-y-1">
-            {errors.map((err, i) => (
-              <li key={i}>
-                <a
-                  href={`#${err.fieldId}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    document.getElementById(err.fieldId)?.focus();
-                  }}
-                  className="underline font-medium"
-                >
-                  {err.message}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Help Drawer — works offline & with AI off (A2, B4) */}
-      {helpOpen && (
-        <div
-          role="region"
-          aria-label={t("widgetHelpTitle")}
-          className="p-4 rounded-xl bg-[#EEEBF8] border border-[#D8CFF2] space-y-3"
-        >
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="text-sm font-semibold text-[#111111]">{t("widgetHelpTitle")}</h3>
-            <button
-              ref={helpCloseRef}
-              type="button"
-              onClick={() => {
-                setHelpOpen(false);
-                helpBtnRef.current?.focus();
-              }}
-              className="text-xs font-medium text-[#6A4FC4] underline min-h-[36px] px-2"
-            >
-              {t("closeButton")}
-            </button>
-          </div>
-
-          {/* Pre-written offline-safe guidance (always shown immediately) */}
-          <div className="p-3.5 rounded-lg bg-white border border-[#E7E7E4] space-y-2.5 text-sm">
-            <p className="text-xs font-semibold text-[#6B6B6B]">{t("widgetHelpNoAiFallbackLabel")}</p>
-            <p className="text-[#111111] leading-relaxed">{prewrittenHelp}</p>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                ref={helpTakeMeRef}
-                type="button"
-                onClick={() => {
-                  const el = document.getElementById(helpTarget.id);
-                  if (el) {
-                    el.focus();
-                    announce(t("widgetHelpMovedAnnouncement", { label: helpTarget.label }));
-                  }
-                }}
-                className="px-3 min-h-[36px] rounded-lg bg-[#111111] text-white text-xs font-medium"
-              >
-                {t("widgetHelpTakeMeThere")}
-              </button>
-              <button
-                type="button"
-                onClick={() => speakText(prewrittenHelp, lang)}
-                className="inline-flex items-center gap-1 px-2.5 min-h-[36px] rounded-lg border border-[#E7E7E4] bg-white text-xs font-medium text-[#111111]"
-              >
-                <VolumeIcon size={13} />
-                <span>{t("widgetReadAloud")}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setPartnerHelpVisible((v) => !v)}
-                className="px-3 min-h-[36px] rounded-lg border border-[#E7E7E4] bg-white text-[#111111] text-xs font-medium"
-              >
-                {t("widgetHelpAskPerson")}
-              </button>
-            </div>
-
-            {partnerHelpVisible && (
-              <p className="text-xs text-[#1F5C46] bg-[#E4F2EC] p-2.5 rounded-lg">
-                {t("widgetHelpPartnerMessage")}
-              </p>
-            )}
-          </div>
-
-          {/* Free-form AI question ONLY when AI is on & online */}
-          {canSmartHelp ? (
-            <div className="space-y-2.5 pt-1">
-              <p className="text-xs text-[#6B6B6B]">{t("cloudAiNotice")}</p>
-              <form onSubmit={handleSmartHelpSubmit} className="flex flex-col sm:flex-row gap-2">
+            {isSimpleMode && effectiveSettings.readAloud && canReadCurrent && (
+              <label className="inline-flex items-center gap-2 text-xs text-[var(--muted)] cursor-pointer ml-auto">
                 <input
-                  ref={helpInputRef}
-                  type="text"
-                  value={helpProblem}
-                  onChange={(e) => setHelpProblem(e.target.value)}
-                  placeholder={t("widgetHelpPlaceholder")}
-                  aria-label={t("widgetHelpPlaceholder")}
-                  className="flex-1 min-h-[42px] px-3 rounded-lg bg-white border border-[#E7E7E4] text-sm text-[#111111]"
+                  type="checkbox"
+                  checked={autoReadSimple}
+                  onChange={(e) => setAutoReadSimple(e.target.checked)}
+                  className="w-4 h-4 accent-[var(--accent)]"
                 />
-                <button
-                  type="submit"
-                  disabled={helpLoading}
-                  className="mezgeb-btn-primary text-sm whitespace-nowrap"
-                >
-                  {helpLoading ? t("loadingText") : t("widgetHelpAskBtn")}
-                </button>
-              </form>
-
-              {helpAiAnswer && (
-                <div className="p-3.5 rounded-lg bg-white border border-[#8F6FE0] space-y-2 text-sm">
-                  <p className="text-[#111111] leading-relaxed">{helpAiAnswer.explanation}</p>
-                  {helpAiAnswer.targetFieldId && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const el = document.getElementById(helpAiAnswer.targetFieldId!);
-                        if (el) {
-                          el.focus();
-                          announce(
-                            t("widgetHelpMovedAnnouncement", {
-                              label: helpAiAnswer.targetFieldLabel,
-                            })
-                          );
-                        }
-                      }}
-                      className="px-3 min-h-[34px] rounded-lg bg-[#111111] text-white text-xs font-medium"
-                    >
-                      {t("widgetHelpTakeMeThere")}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          ) : (
-            <p className="text-xs text-[#6B6B6B]">{t("widgetHelpOfflineNote")}</p>
-          )}
-        </div>
-      )}
-
-      {/* Main Step Body */}
-      {currentQuestion ? (
-        <div className="space-y-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-3.5">
-              <div className="w-10 h-10 rounded-xl bg-[#F5F5F3] text-[#111111] flex items-center justify-center shrink-0 mt-0.5">
-                <QuestionIcon name={currentQuestion.icon} size={20} />
-              </div>
-              <div className="space-y-1">
-                <h2 className="text-xl md:text-2xl font-semibold text-[#111111] tracking-tight">
-                  {primaryLabel}
-                </h2>
-                {secondaryLabel && secondaryLabel !== primaryLabel && (
-                  <p className="text-sm text-[#6B6B6B]">{secondaryLabel}</p>
-                )}
-                {currentQuestion.hint?.[lang] && (
-                  <p className="text-sm text-[#6B6B6B] pt-1">{currentQuestion.hint[lang]}</p>
-                )}
-              </div>
-            </div>
-
-            {!readOnly && effectiveSettings.sayItSimply && currentQuestion.type !== "info" && (
-              <button
-                type="button"
-                onClick={handleSimplifyQuestion}
-                disabled={simplifying}
-                className="shrink-0 px-3 min-h-[36px] rounded-lg border border-[#E7E7E4] bg-white text-xs font-medium text-[#6A4FC4] hover:bg-[#EEEBF8]"
-              >
-                {simplifying ? t("widgetSimplifying") : t("widgetSimplifyBtn")}
-              </button>
+                <span>{t("widgetModeAutoReadLabel")}</span>
+              </label>
             )}
+
+            {!readOnly &&
+              effectiveSettings.sayItSimply &&
+              currentQuestion &&
+              currentQuestion.type !== "info" &&
+              !isSimpleMode && (
+                <Button
+                  variant="quiet"
+                  size="md"
+                  loading={simplifying}
+                  loadingLabel={t("widgetSimplifying")}
+                  onClick={handleSimplifyQuestion}
+                >
+                  {t("widgetSimplifyBtn")}
+                </Button>
+              )}
           </div>
 
           {simplifiedInfo && (
-            <div className="p-3 rounded-xl bg-[#EEEBF8] border border-[#D8CFF2] text-sm space-y-1">
-              <div className="flex items-center justify-between gap-2 text-xs text-[#6A4FC4] font-semibold">
-                <span>{t("widgetSimplifiedLabel")}</span>
-                {simplifiedInfo.usedAi && <span className="font-normal text-[#6B6B6B]">{t("cloudAiNotice")}</span>}
-              </div>
-              <p className="text-[#111111] font-medium">{simplifiedInfo.text}</p>
+            <Banner variant="info">
+              <p className="font-medium text-[var(--ink)]">{simplifiedInfo.text}</p>
+            </Banner>
+          )}
+        </div>
+
+        {/* Help Panel: bottom sheet on phone, inline panel on desktop */}
+        {helpOpen && (
+          <div
+            role="region"
+            aria-label={t("widgetHelpTitle")}
+            style={{ boxShadow: "var(--shadow-float)" }}
+            className="fixed inset-x-0 bottom-0 z-50 md:static rounded-t-[16px] md:rounded-[10px] border border-[var(--line-strong)] bg-[var(--sand)] p-5 space-y-4 text-left max-h-[80vh] overflow-y-auto"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h3
+                ref={helpHeadingRef}
+                tabIndex={-1}
+                className="text-base font-semibold text-[var(--ink)] outline-none"
+              >
+                {t("widgetHelpTitle")}
+              </h3>
+              <Button
+                variant="secondary"
+                size="md"
+                onClick={() => {
+                  setHelpOpen(false);
+                  (textInputRef.current ?? helpBtnRef.current)?.focus();
+                }}
+              >
+                <X size={16} strokeWidth={1.75} aria-hidden="true" />
+                <span>{t("widgetHelpCloseBtn")}</span>
+              </Button>
             </div>
-          )}
 
-          {/* Voice message for choice or general voice feedback */}
-          {voiceMessage && (
-            <p
-              role="status"
-              className="text-xs text-[#111111] bg-[#F5F5F3] px-3 py-2 rounded-lg border border-[#E7E7E4]"
-            >
-              {voiceMessage}
-            </p>
-          )}
+            <div className="p-4 rounded-[10px] border border-[var(--line)] bg-[var(--paper)] space-y-2.5 text-sm">
+              <p className="text-[var(--ink)] leading-relaxed">{prewrittenHelp}</p>
+              <p className="text-xs text-[var(--muted)]">
+                <strong className="text-[var(--ink)]">{t("widgetHelpExampleLabel")}:</strong>{" "}
+                {exampleAnswer}
+              </p>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <ReadAloudButton
+                  text={prewrittenHelp}
+                  lang={lang}
+                  serverReadAloud={serverReadAloudForLang}
+                  speaking={speaking}
+                  label={t("widgetReadAloud")}
+                  stopLabel={t("widgetStopReading")}
+                  onToggle={() => speakText(prewrittenHelp, lang)}
+                />
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => setPartnerHelpVisible((v) => !v)}
+                >
+                  {t("widgetHelpAskPerson")}
+                </Button>
+              </div>
+              {partnerHelpVisible && (
+                <Banner variant="success">{t("widgetHelpPartnerMessage")}</Banner>
+              )}
+            </div>
 
-          {/* VOICE INPUT CONTROLS for text/phone/number/work-story */}
-          {canVoice &&
-            currentQuestion.allowVoice !== false &&
-            !readOnly &&
-            (currentQuestion.type === "text" ||
-              currentQuestion.type === "phone" ||
+            {canSmartHelp && (
+              <form onSubmit={handleSmartHelpSubmit} className="space-y-3">
+                <Field
+                  label={t("widgetHelpAskFieldLabel")}
+                  hint={t("cloudAiNotice")}
+                  inputProps={{
+                    type: "text",
+                    value: helpProblem,
+                    onChange: (e) => setHelpProblem(e.target.value),
+                    placeholder: t("widgetHelpPlaceholder"),
+                  }}
+                />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="md"
+                  loading={helpLoading}
+                  loadingLabel={t("loadingText")}
+                >
+                  {t("widgetHelpAskBtn")}
+                </Button>
+                {helpAiAnswer && (
+                  <div className="p-3.5 rounded-[10px] border border-[var(--line)] bg-[var(--paper)] space-y-2 text-sm">
+                    <p className="text-[var(--ink)] leading-relaxed">{helpAiAnswer.explanation}</p>
+                    {helpAiAnswer.targetFieldId && (
+                      <Button
+                        variant="secondary"
+                        size="md"
+                        onClick={() => {
+                          const el = byId(helpAiAnswer.targetFieldId!);
+                          if (el) {
+                            el.focus();
+                            announce(
+                              t("widgetHelpMovedAnnouncement", {
+                                label: helpAiAnswer.targetFieldLabel,
+                              })
+                            );
+                          }
+                        }}
+                      >
+                        {t("widgetHelpTakeMeThere")}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </form>
+            )}
+          </div>
+        )}
+
+        {/* MAIN STEP ANSWER BODY */}
+        {currentQuestion ? (
+          <div className="space-y-4">
+            {/* TEXT / EMAIL / NUMBER / PHONE with VoiceButton at the right */}
+            {(currentQuestion.type === "text" ||
+              currentQuestion.type === "email" ||
               currentQuestion.type === "number" ||
-              currentQuestion.type === "work-story") && (
-              <div className="p-3.5 rounded-xl bg-[#F5F5F3] border border-[#E7E7E4] space-y-2.5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    {!recording ? (
+              currentQuestion.type === "phone") && (
+              <Field
+                id={getFieldDomId(currentQuestion.id)}
+                label={primaryLabel}
+                labelLang={lang}
+                required={currentQuestion.required}
+                hint={
+                  canVoice && currentQuestion.allowVoice !== false && !readOnly
+                    ? `${t("widgetRecordingLimit")} ${voiceNotice}`
+                    : undefined
+                }
+                error={currentErrorMap.get(getFieldDomId(currentQuestion.id))}
+                rightSlot={
+                  canVoice && currentQuestion.allowVoice !== false && !readOnly ? (
+                    <VoiceButton
+                      widgetSize
+                      state={
+                        pendingTranscript?.fieldKey === currentQuestion.id
+                          ? "review"
+                          : voiceUiState === "listening" || voiceUiState === "processing"
+                            ? voiceUiState
+                            : "idle"
+                      }
+                      seconds={recordSeconds}
+                      onStart={() =>
+                        startVoiceRecording(
+                          currentQuestion.id,
+                          currentQuestion.label[lang],
+                          currentQuestion.type
+                        )
+                      }
+                      onStop={stopVoiceRecording}
+                      labels={{
+                        speakLabel: t("widgetSpeakAnswerLabel"),
+                        listeningLabel: t("widgetVoiceListeningLabel"),
+                        processingLabel: t("widgetVoiceProcessingLabel"),
+                      }}
+                    />
+                  ) : undefined
+                }
+                inputRef={(el: HTMLInputElement | null) => {
+                  textInputRef.current = el;
+                }}
+                inputProps={{
+                  type:
+                    currentQuestion.type === "email"
+                      ? "email"
+                      : currentQuestion.type === "phone"
+                        ? "tel"
+                        : "text",
+                  inputMode:
+                    currentQuestion.type === "phone" || currentQuestion.type === "number"
+                      ? "numeric"
+                      : undefined,
+                  disabled: readOnly,
+                  value:
+                    currentQuestion.type === "phone"
+                      ? formatPhoneGrouped(String(answers[currentQuestion.id] ?? ""))
+                      : String(answers[currentQuestion.id] ?? ""),
+                  onChange: (e) => {
+                    const raw = e.target.value;
+                    if (currentQuestion.type === "phone") {
+                      updateAnswer(currentQuestion.id, normalizePhoneDigits(raw));
+                    } else if (currentQuestion.type === "number") {
+                      updateAnswer(currentQuestion.id, raw.replace(/[^\d.-]/g, ""));
+                    } else {
+                      updateAnswer(currentQuestion.id, raw);
+                    }
+                  },
+                }}
+              />
+            )}
+
+            {/* Inline Voice review/failed box below text/phone/email/number inputs */}
+            {(currentQuestion.type === "text" ||
+              currentQuestion.type === "email" ||
+              currentQuestion.type === "number" ||
+              currentQuestion.type === "phone") &&
+              (voiceUiState === "review" || voiceUiState === "failed") && (
+                <VoiceButton
+                  widgetSize
+                  state={voiceUiState}
+                  transcript={pendingTranscript?.value ?? ""}
+                  onTranscriptChange={(val) =>
+                    pendingTranscript && setPendingTranscript({ ...pendingTranscript, value: val })
+                  }
+                  onStart={() =>
+                    startVoiceRecording(
+                      currentQuestion.id,
+                      currentQuestion.label[lang],
+                      currentQuestion.type
+                    )
+                  }
+                  onStop={stopVoiceRecording}
+                  onKeep={() => {
+                    if (pendingTranscript) {
+                      updateAnswer(currentQuestion.id, pendingTranscript.value);
+                      setPendingTranscript(null);
+                      setVoiceUiState("idle");
+                    }
+                  }}
+                  onRetry={() => {
+                    setPendingTranscript(null);
+                    setVoiceUiState("idle");
+                    startVoiceRecording(
+                      currentQuestion.id,
+                      currentQuestion.label[lang],
+                      currentQuestion.type
+                    );
+                  }}
+                  labels={{
+                    keepLabel: t("widgetVoiceKeepBtn"),
+                    tryAgainLabel: t("widgetVoiceTryAgainBtn"),
+                    failedMessage: t("widgetVoiceFailedMsg"),
+                    transcriptLabel: t("widgetTranscriptConfirmTitle"),
+                  }}
+                />
+              )}
+
+            {/* YES / NO */}
+            {currentQuestion.type === "yes-no" && (
+              <div className="space-y-3">
+                {builderCanvas ? (
+                  <div className="space-y-2.5">
+                    {(
+                      [
+                        {
+                          idx: 0,
+                          defEn: translations.en.yesButton,
+                          defAm: translations.am.yesButton,
+                        },
+                        {
+                          idx: 1,
+                          defEn: translations.en.noButton,
+                          defAm: translations.am.noButton,
+                        },
+                      ] as const
+                    ).map(({ idx, defEn, defAm }) => {
+                      const opt = currentQuestion.options?.[idx];
+                      const val = opt?.label?.[lang] ?? (lang === "am" ? defAm : defEn);
+                      const enRef = opt?.label?.en || defEn;
+                      return (
+                        <div
+                          key={idx}
+                          className="min-h-[48px] px-3.5 py-2 rounded-[10px] border border-[var(--line-strong)] bg-[var(--paper)] flex items-center gap-3"
+                        >
+                          <span
+                            className="w-4 h-4 rounded-full border-2 border-[var(--line-strong)] shrink-0"
+                            aria-hidden="true"
+                          />
+                          <div className="flex-1 min-w-0 space-y-0.5">
+                            {lang === "am" && !opt?.label?.am?.trim() && enRef.trim() && (
+                              <p className="text-xs text-[var(--muted)]">
+                                {builderCanvas.labels.englishReference(enRef)}
+                              </p>
+                            )}
+                            <input
+                              type="text"
+                              aria-label={t("builderCanvasOptionAria", {
+                                num: idx + 1,
+                                lang: lang === "en" ? "English" : "አማርኛ",
+                              })}
+                              value={val}
+                              onChange={(e) =>
+                                builderCanvas.onUpdateOptionLabel?.(idx, e.target.value)
+                              }
+                              className="w-full bg-transparent text-base font-medium text-[var(--ink)] focus:outline-2 focus:outline-[var(--accent)] rounded-[4px] px-1 -mx-1"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <>
+                    {renderVoiceControlForQuestion(
+                      {
+                        ...currentQuestion,
+                        options: [
+                          {
+                            value: "yes",
+                            label: currentQuestion.options?.[0]?.label ?? {
+                              en: translations.en.yesButton,
+                              am: translations.am.yesButton,
+                            },
+                          },
+                          {
+                            value: "no",
+                            label: currentQuestion.options?.[1]?.label ?? {
+                              en: translations.en.noButton,
+                              am: translations.am.noButton,
+                            },
+                          },
+                        ],
+                      },
+                      false
+                    )}
+                    <ChoiceList
+                      name={`${widgetId}-${currentQuestion.id}`}
+                      legend={primaryLabel}
+                      mode="single"
+                      disabled={readOnly}
+                      value={String(answers[currentQuestion.id] ?? "")}
+                      onChange={(v) => updateAnswer(currentQuestion.id, v)}
+                      options={[
+                        {
+                          value: "yes",
+                          title: currentQuestion.options?.[0]?.label[lang] || t("yesButton"),
+                        },
+                        {
+                          value: "no",
+                          title: currentQuestion.options?.[1]?.label[lang] || t("noButton"),
+                        },
+                      ]}
+                    />
+                  </>
+                )}
+                {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
+                  <p role="alert" className="text-sm font-medium text-[var(--error)]">
+                    {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* INFO SCREEN */}
+            {currentQuestion.type === "info" && (
+              <div className="p-4 rounded-[10px] bg-[var(--stone)] border border-[var(--line)] text-base text-[var(--ink)]">
+                {currentQuestion.hint?.[lang] || currentQuestion.label[lang]}
+              </div>
+            )}
+
+            {/* CONSENT STEP */}
+            {currentQuestion.type === "consent" && (
+              <div className="space-y-2">
+                <label className="flex items-start gap-3 p-4 rounded-[10px] bg-[var(--stone)] border border-[var(--line-strong)] cursor-pointer min-h-[56px]">
+                  <input
+                    id={getFieldDomId(currentQuestion.id)}
+                    type="checkbox"
+                    disabled={readOnly}
+                    checked={Boolean(answers[currentQuestion.id])}
+                    onChange={(e) => updateAnswer(currentQuestion.id, e.target.checked)}
+                    className="mt-1 w-5 h-5 accent-[var(--accent)]"
+                  />
+                  <span className="text-base text-[var(--ink)] font-medium">
+                    {currentQuestion.label[lang]}
+                  </span>
+                </label>
+                {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
+                  <p role="alert" className="text-sm font-medium text-[var(--error)]">
+                    {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* DATE OF BIRTH (Three plain selects: Day, Month, Year — empty defaults) */}
+            {currentQuestion.type === "date" && (
+              <div className="space-y-4">
+                <div
+                  className="inline-flex rounded-[6px] border border-[var(--line-strong)] bg-[var(--stone)] p-0.5"
+                  role="group"
+                  aria-label={t("widgetCalGroupLabel")}
+                >
+                  <button
+                    type="button"
+                    onClick={() => updateAnswer("dob_calendar", "eth")}
+                    aria-pressed={answers.dob_calendar !== "greg"}
+                    className={`px-3.5 min-h-[38px] rounded-[4px] text-xs font-semibold cursor-pointer ${
+                      answers.dob_calendar !== "greg"
+                        ? "bg-[var(--paper)] text-[var(--ink)]"
+                        : "text-[var(--muted)]"
+                    }`}
+                  >
+                    {t("widgetCalEth")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateAnswer("dob_calendar", "greg")}
+                    aria-pressed={answers.dob_calendar === "greg"}
+                    className={`px-3.5 min-h-[38px] rounded-[4px] text-xs font-semibold cursor-pointer ${
+                      answers.dob_calendar === "greg"
+                        ? "bg-[var(--paper)] text-[var(--ink)]"
+                        : "text-[var(--muted)]"
+                    }`}
+                  >
+                    {t("widgetCalGreg")}
+                  </button>
+                </div>
+
+                {answers.dob_calendar !== "greg" ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="space-y-1">
+                        <label
+                          htmlFor={getFieldDomId("dob_eth_day")}
+                          className="block text-sm font-medium text-[var(--ink)]"
+                        >
+                          {t("widgetCalDay")}
+                        </label>
+                        <select
+                          id={getFieldDomId("dob_eth_day")}
+                          disabled={readOnly}
+                          value={String(answers.dob_eth_day ?? "")}
+                          onChange={(e) => updateAnswer("dob_eth_day", e.target.value)}
+                          className="w-full min-h-[48px] px-3 rounded-[6px] border border-[var(--line-strong)] bg-[var(--paper)] text-base"
+                        >
+                          <option value="">—</option>
+                          {Array.from({ length: maxEthDays }, (_, i) => i + 1).map((d) => (
+                            <option key={d} value={String(d)}>
+                              {d}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label
+                          htmlFor={getFieldDomId("dob_eth_month")}
+                          className="block text-sm font-medium text-[var(--ink)]"
+                        >
+                          {t("widgetCalMonth")}
+                        </label>
+                        <select
+                          id={getFieldDomId("dob_eth_month")}
+                          disabled={readOnly}
+                          value={String(answers.dob_eth_month ?? "")}
+                          onChange={(e) => updateAnswer("dob_eth_month", e.target.value)}
+                          className="w-full min-h-[48px] px-3 rounded-[6px] border border-[var(--line-strong)] bg-[var(--paper)] text-base"
+                        >
+                          <option value="">{t("widgetCalChooseMonth")}</option>
+                          {ETHIOPIAN_MONTHS.map((m) => (
+                            <option key={m.num} value={String(m.num)}>
+                              {lang === "am" ? m.am : m.en}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label
+                          htmlFor={getFieldDomId("dob_eth_year")}
+                          className="block text-sm font-medium text-[var(--ink)]"
+                        >
+                          {t("widgetCalYear")}
+                        </label>
+                        <select
+                          id={getFieldDomId("dob_eth_year")}
+                          disabled={readOnly}
+                          value={String(answers.dob_eth_year ?? "")}
+                          onChange={(e) => updateAnswer("dob_eth_year", e.target.value)}
+                          aria-invalid={currentErrorMap.has(getFieldDomId("dob_eth_year"))}
+                          className="w-full min-h-[48px] px-3 rounded-[6px] border border-[var(--line-strong)] bg-[var(--paper)] text-base"
+                        >
+                          <option value="">—</option>
+                          {ethYearOptions.map((y) => (
+                            <option key={y} value={String(y)}>
+                              {y}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {gregConverted && (
+                      <p className="text-sm text-[var(--muted)]">
+                        {t("widgetDobThatIs", { date: formatGregorianDate(gregConverted) })}
+                      </p>
+                    )}
+                    {currentErrorMap.has(getFieldDomId("dob_eth_year")) && (
+                      <p role="alert" className="text-sm font-medium text-[var(--error)]">
+                        {currentErrorMap.get(getFieldDomId("dob_eth_year"))}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="space-y-1">
+                        <label
+                          htmlFor={getFieldDomId("dob_greg_day")}
+                          className="block text-sm font-medium text-[var(--ink)]"
+                        >
+                          {t("widgetCalDay")}
+                        </label>
+                        <select
+                          id={getFieldDomId("dob_greg_day")}
+                          disabled={readOnly}
+                          value={String(answers.dob_greg_day ?? "")}
+                          onChange={(e) => updateAnswer("dob_greg_day", e.target.value)}
+                          className="w-full min-h-[48px] px-3 rounded-[6px] border border-[var(--line-strong)] bg-[var(--paper)] text-base"
+                        >
+                          <option value="">—</option>
+                          {Array.from({ length: maxGregDays }, (_, i) => i + 1).map((d) => (
+                            <option key={d} value={String(d)}>
+                              {d}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label
+                          htmlFor={getFieldDomId("dob_greg_month")}
+                          className="block text-sm font-medium text-[var(--ink)]"
+                        >
+                          {t("widgetCalMonth")}
+                        </label>
+                        <select
+                          id={getFieldDomId("dob_greg_month")}
+                          disabled={readOnly}
+                          value={String(answers.dob_greg_month ?? "")}
+                          onChange={(e) => updateAnswer("dob_greg_month", e.target.value)}
+                          className="w-full min-h-[48px] px-3 rounded-[6px] border border-[var(--line-strong)] bg-[var(--paper)] text-base"
+                        >
+                          <option value="">{t("widgetCalChooseMonth")}</option>
+                          {GREGORIAN_MONTHS_EN.map((m, idx) => (
+                            <option key={m} value={String(idx + 1)}>
+                              {m}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label
+                          htmlFor={getFieldDomId("dob_greg_year")}
+                          className="block text-sm font-medium text-[var(--ink)]"
+                        >
+                          {t("widgetCalYear")}
+                        </label>
+                        <select
+                          id={getFieldDomId("dob_greg_year")}
+                          disabled={readOnly}
+                          value={String(answers.dob_greg_year ?? "")}
+                          onChange={(e) => updateAnswer("dob_greg_year", e.target.value)}
+                          aria-invalid={currentErrorMap.has(getFieldDomId("dob_greg_year"))}
+                          className="w-full min-h-[48px] px-3 rounded-[6px] border border-[var(--line-strong)] bg-[var(--paper)] text-base"
+                        >
+                          <option value="">—</option>
+                          {gregYearOptions.map((y) => (
+                            <option key={y} value={String(y)}>
+                              {y}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {ethConverted && (
+                      <p className="text-sm text-[var(--muted)]">
+                        {t("widgetDobThatIs", { date: formatEthiopianDate(ethConverted, lang) })}
+                      </p>
+                    )}
+                    {currentErrorMap.has(getFieldDomId("dob_greg_year")) && (
+                      <p role="alert" className="text-sm font-medium text-[var(--error)]">
+                        {currentErrorMap.get(getFieldDomId("dob_greg_year"))}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SINGLE CHOICE / MULTICHOICE */}
+            {(currentQuestion.type === "choice" || currentQuestion.type === "multichoice") && (
+              <div className="space-y-3" id={getFieldDomId(currentQuestion.id)}>
+                {builderCanvas ? (
+                  <div className="space-y-2.5">
+                    {(currentQuestion.options ?? []).map((opt, optIdx) => {
+                      const optVal = opt.label?.[lang] ?? "";
+                      const optEn = opt.label?.en ?? "";
+                      return (
+                        <div
+                          key={`${opt.value}-${optIdx}`}
+                          className="group min-h-[48px] px-3.5 py-2 rounded-[10px] border border-[var(--line-strong)] bg-[var(--paper)] flex items-center gap-3"
+                        >
+                          <span
+                            className={`w-4 h-4 border-2 border-[var(--line-strong)] shrink-0 ${
+                              currentQuestion.type === "choice" ? "rounded-full" : "rounded-[4px]"
+                            }`}
+                            aria-hidden="true"
+                          />
+                          <div className="flex-1 min-w-0 space-y-0.5">
+                            {lang === "am" && !opt.label?.am?.trim() && optEn.trim() && (
+                              <p className="text-xs text-[var(--muted)]">
+                                {builderCanvas.labels.englishReference(optEn)}
+                              </p>
+                            )}
+                            <input
+                              type="text"
+                              aria-label={t("builderCanvasOptionAria", {
+                                num: optIdx + 1,
+                                lang: lang === "en" ? "English" : "አማርኛ",
+                              })}
+                              value={optVal}
+                              onChange={(e) =>
+                                builderCanvas.onUpdateOptionLabel?.(optIdx, e.target.value)
+                              }
+                              className="w-full bg-transparent text-base font-medium text-[var(--ink)] focus:outline-2 focus:outline-[var(--accent)] rounded-[4px] px-1 -mx-1"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => builderCanvas.onRemoveOption?.(optIdx)}
+                            aria-label={builderCanvas.labels.removeOptionAria(
+                              optVal || optEn || String(optIdx + 1)
+                            )}
+                            className="min-w-[36px] min-h-[36px] rounded-[6px] inline-flex items-center justify-center text-[var(--muted)] hover:text-[var(--error)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 cursor-pointer shrink-0"
+                          >
+                            <X size={20} strokeWidth={1.75} aria-hidden="true" />
+                          </button>
+                        </div>
+                      );
+                    })}
+
+                    <div className="flex items-center gap-2 pt-1 relative" ref={canvasOptMenuRef}>
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={() => builderCanvas.onAddOption?.()}
+                        className="flex-1 min-h-[44px] px-3.5 rounded-[10px] border border-dashed border-[var(--line-strong)] text-sm font-medium text-[var(--ink)] hover:bg-[var(--stone)] inline-flex items-center gap-2 cursor-pointer"
+                      >
+                        <Plus size={20} strokeWidth={1.75} aria-hidden="true" />
+                        <span>{builderCanvas.labels.addOptionBtn}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        aria-label={builderCanvas.labels.moreOptionsAria}
+                        aria-expanded={canvasOptMenuOpen}
+                        onClick={() => setCanvasOptMenuOpen((v) => !v)}
+                        className="min-w-[44px] min-h-[44px] rounded-[10px] border border-[var(--line-strong)] bg-[var(--paper)] hover:bg-[var(--stone)] inline-flex items-center justify-center text-[var(--ink)] cursor-pointer shrink-0"
+                      >
+                        <MoreHorizontal size={20} strokeWidth={1.75} aria-hidden="true" />
+                      </button>
+
+                      {canvasOptMenuOpen && (
+                        <div
+                          role="menu"
+                          style={{ boxShadow: "var(--shadow-float)" }}
+                          className="absolute right-0 bottom-full mb-1.5 z-30 min-w-[200px] rounded-[10px] border border-[var(--line-strong)] bg-[var(--paper)] p-1.5 space-y-0.5"
+                        >
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setCanvasOptMenuOpen(false);
+                              builderCanvas.onOpenPasteOptions?.();
+                            }}
+                            className="w-full text-left px-3 min-h-[40px] rounded-[6px] text-sm text-[var(--ink)] hover:bg-[var(--stone)] cursor-pointer"
+                          >
+                            {builderCanvas.labels.pasteOptionsItem}
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setCanvasOptMenuOpen(false);
+                              builderCanvas.onAddOtherOption?.();
+                            }}
+                            className="w-full text-left px-3 min-h-[40px] rounded-[6px] text-sm text-[var(--ink)] hover:bg-[var(--stone)] cursor-pointer"
+                          >
+                            {builderCanvas.labels.addOtherItem}
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setCanvasOptMenuOpen(false);
+                              builderCanvas.onAddPreferNotOption?.();
+                            }}
+                            className="w-full text-left px-3 min-h-[40px] rounded-[6px] text-sm text-[var(--ink)] hover:bg-[var(--stone)] cursor-pointer"
+                          >
+                            {builderCanvas.labels.addPreferNotItem}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  currentQuestion.options && (
+                    <>
+                      {renderVoiceControlForQuestion(
+                        currentQuestion,
+                        currentQuestion.type === "multichoice"
+                      )}
+                      <ChoiceList
+                        name={`${widgetId}-${currentQuestion.id}`}
+                        legend={primaryLabel}
+                        mode={currentQuestion.type === "choice" ? "single" : "multi"}
+                        disabled={readOnly}
+                        value={
+                          currentQuestion.type === "choice"
+                            ? String(answers[currentQuestion.id] ?? "")
+                            : Array.isArray(answers[currentQuestion.id])
+                              ? (answers[currentQuestion.id] as string[])
+                              : []
+                        }
+                        onChange={(v) => {
+                          updateAnswer(currentQuestion.id, v);
+                          if (
+                            currentQuestion.type === "choice" &&
+                            currentQuestion.id === "language" &&
+                            (v === "am" || v === "en")
+                          ) {
+                            setLang(v);
+                          }
+                        }}
+                        options={currentQuestion.options.map((opt) => ({
+                          value: opt.value,
+                          title: opt.label[lang],
+                        }))}
+                      />
+                    </>
+                  )
+                )}
+                {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
+                  <p role="alert" className="text-sm font-medium text-[var(--error)]">
+                    {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* ID ROUTES */}
+            {currentQuestion.type === "id-routes" &&
+              (() => {
+                const allowedRoutes = safeTemplate.idRoutes.filter(
+                  (r) => effectiveSettings.partnerReferral || r !== "partner_refer"
+                );
+                const routeOptions = (
+                  [
+                    {
+                      value: "fayda",
+                      label: {
+                        en: translations.en.heroOptFayda,
+                        am: translations.am.heroOptFayda,
+                      },
+                    },
+                    {
+                      value: "refugee_id",
+                      label: {
+                        en: translations.en.heroOptRefugee,
+                        am: translations.am.heroOptRefugee,
+                      },
+                    },
+                    {
+                      value: "other_document",
+                      label: {
+                        en: translations.en.heroOptOther,
+                        am: translations.am.heroOptOther,
+                      },
+                    },
+                    {
+                      value: "partner_refer",
+                      label: {
+                        en: translations.en.heroOptPartner,
+                        am: translations.am.heroOptPartner,
+                      },
+                    },
+                  ] as { value: IdRoute; label: { en: string; am: string } }[]
+                ).filter((o) => allowedRoutes.includes(o.value));
+
+                return (
+                  <div className="space-y-4" id={getFieldDomId(currentQuestion.id)}>
+                    {renderVoiceControlForQuestion(
+                      { ...currentQuestion, options: routeOptions },
+                      false
+                    )}
+
+                    <ChoiceList
+                      name={`${widgetId}-id_route`}
+                      legend={primaryLabel}
+                      mode="single"
+                      disabled={readOnly}
+                      value={String(answers.id_route ?? "")}
+                      onChange={(v) => updateAnswer("id_route", v as IdRoute)}
+                      options={routeOptions.map((o) => ({
+                        value: o.value,
+                        title: o.label[lang],
+                      }))}
+                    />
+
+                    {/* Another document upload + camera option */}
+                    {answers.id_route === "other_document" && (
+                      <div className="p-4 rounded-[10px] border border-[var(--line)] bg-[var(--stone)] space-y-3">
+                        <p className="text-sm font-medium text-[var(--ink)]">
+                          {t("widgetOtherDocUploadLabel")}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <label className="min-h-[48px] px-4 rounded-[10px] border border-[var(--ink)] bg-[var(--paper)] text-sm font-medium text-[var(--ink)] inline-flex items-center gap-2 cursor-pointer">
+                            <FileUp size={20} strokeWidth={1.75} aria-hidden="true" />
+                            <span>{t("widgetOtherDocUploadLabel")}</span>
+                            <input
+                              type="file"
+                              accept="image/*,.pdf"
+                              disabled={readOnly}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) updateAnswer("other_doc_name", file.name);
+                              }}
+                              className="sr-only"
+                            />
+                          </label>
+
+                          <label className="min-h-[48px] px-4 rounded-[10px] border border-[var(--line-strong)] bg-[var(--paper)] text-sm font-medium text-[var(--ink)] inline-flex items-center gap-2 cursor-pointer">
+                            <Camera size={20} strokeWidth={1.75} aria-hidden="true" />
+                            <span>{t("widgetOtherDocCameraLabel")}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              disabled={readOnly}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) updateAnswer("other_doc_name", file.name);
+                              }}
+                              className="sr-only"
+                            />
+                          </label>
+                        </div>
+                        {answers.other_doc_name && (
+                          <p className="text-sm text-[var(--mint-ink)] font-medium">
+                            {t("widgetOtherDocSelected", { name: String(answers.other_doc_name) })}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Partner vouching option */}
+                    {answers.id_route === "partner_refer" && (
+                      <div className="p-4 rounded-[10px] bg-[var(--stone)] border border-[var(--line)] space-y-4">
+                        <div className="space-y-1.5">
+                          <label
+                            htmlFor={getFieldDomId("partner_org")}
+                            className="block text-sm font-medium text-[var(--ink)]"
+                          >
+                            {t("widgetPartnerSelectLabel")}
+                          </label>
+                          <select
+                            id={getFieldDomId("partner_org")}
+                            disabled={readOnly}
+                            value={String(answers.partner_org ?? "")}
+                            onChange={(e) => updateAnswer("partner_org", e.target.value)}
+                            className="w-full min-h-[48px] px-3.5 rounded-[6px] border border-[var(--line-strong)] bg-[var(--paper)] text-base"
+                          >
+                            <option value="">—</option>
+                            <option value="addis_accessibility">{t("widgetPartner1")}</option>
+                            <option value="refugee_support_desk">{t("widgetPartner2")}</option>
+                            <option value="community_tvet">{t("widgetPartner3")}</option>
+                          </select>
+                        </div>
+
+                        <label className="flex items-start gap-3 cursor-pointer min-h-[48px]">
+                          <input
+                            id={getFieldDomId("partner_consent")}
+                            type="checkbox"
+                            disabled={readOnly}
+                            checked={Boolean(answers.partner_consent)}
+                            onChange={(e) => updateAnswer("partner_consent", e.target.checked)}
+                            className="mt-1 w-5 h-5 accent-[var(--accent)]"
+                          />
+                          <span className="text-sm text-[var(--ink)]">
+                            {t("widgetPartnerConsent")}
+                          </span>
+                        </label>
+
+                        <Banner variant="info">{t("widgetPartnerNotice")}</Banner>
+                      </div>
+                    )}
+
+                    {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
+                      <p role="alert" className="text-sm font-medium text-[var(--error)]">
+                        {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
+                      </p>
+                    )}
+                    {currentErrorMap.has(getFieldDomId("partner_consent")) && (
+                      <p role="alert" className="text-sm font-medium text-[var(--error)]">
+                        {currentErrorMap.get(getFieldDomId("partner_consent"))}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
+            {/* SUPPORT NEEDS (PRIVATE BY DEFAULT — OFF) */}
+            {currentQuestion.type === "support" && (
+              <div className="space-y-4" id={getFieldDomId(currentQuestion.id)}>
+                {renderVoiceControlForQuestion(
+                  { ...currentQuestion, id: "support_needs" },
+                  true
+                )}
+
+                <Banner variant="info">
+                  <span className="inline-flex items-center gap-2">
+                    <Lock size={16} strokeWidth={1.75} aria-hidden="true" />
+                    <span>{t("widgetSupportNoDiagnosis")}</span>
+                  </span>
+                </Banner>
+
+                <ChoiceList
+                  name={`${widgetId}-support_needs`}
+                  legend={primaryLabel}
+                  mode="multi"
+                  disabled={readOnly}
+                  value={Array.isArray(answers.support_needs) ? answers.support_needs : []}
+                  onChange={(v) => updateAnswer("support_needs", v)}
+                  options={(currentQuestion.options ?? []).map((opt) => ({
+                    value: opt.value,
+                    title: opt.label[lang],
+                  }))}
+                />
+
+                <div className="p-4 rounded-[10px] bg-[var(--stone)] border border-[var(--line)] space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-base font-semibold text-[var(--ink)] flex items-center gap-2">
+                        <Shield size={18} strokeWidth={1.75} aria-hidden="true" />
+                        <span>{t("widgetSupportShareToggle")}</span>
+                      </p>
+                      <p className="text-sm text-[var(--muted)] mt-0.5">
+                        {answers.support_share_platform
+                          ? t("widgetSupportShareExplainOn")
+                          : t("widgetSupportShareExplainOff")}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={Boolean(answers.support_share_platform)}
+                      aria-label={t("widgetSupportShareToggle")}
+                      disabled={readOnly}
+                      onClick={() =>
+                        updateAnswer("support_share_platform", !answers.support_share_platform)
+                      }
+                      className={`w-12 h-7 rounded-full p-0.5 border shrink-0 cursor-pointer mezgeb-transition ${
+                        answers.support_share_platform
+                          ? "bg-[var(--accent)] border-[var(--accent)]"
+                          : "bg-[var(--paper)] border-[var(--line-strong)]"
+                      }`}
+                    >
+                      <span
+                        className={`block w-5 h-5 rounded-full mezgeb-transition ${
+                          answers.support_share_platform
+                            ? "translate-x-5 bg-[var(--paper)]"
+                            : "translate-x-0 bg-[var(--ink)]"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* WORK STORY & SKILLS */}
+            {currentQuestion.type === "work-story" && (
+              <div className="space-y-4">
+                <Field
+                  id={getFieldDomId(currentQuestion.id)}
+                  as="textarea"
+                  label={primaryLabel}
+                  labelLang={lang}
+                  required={currentQuestion.required}
+                  rightSlot={
+                    canVoice && currentQuestion.allowVoice !== false && !readOnly ? (
+                      <VoiceButton
+                        widgetSize
+                        state={voiceUiState === "listening" || voiceUiState === "processing" ? voiceUiState : "idle"}
+                        seconds={recordSeconds}
+                        onStart={() =>
                           startVoiceRecording(
                             currentQuestion.id,
                             currentQuestion.label[lang],
                             currentQuestion.type
                           )
                         }
-                        disabled={sendingVoice}
-                        className="inline-flex items-center gap-2 px-3.5 min-h-[40px] rounded-lg bg-[#111111] text-white text-sm font-medium hover:bg-[#2A2A2A] disabled:opacity-50"
-                      >
-                        <MicIcon size={16} />
-                        <span>{sendingVoice ? t("widgetSendingVoice") : t("widgetSpeakBtn")}</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={stopVoiceRecording}
-                        className="inline-flex items-center gap-2 px-3.5 min-h-[40px] rounded-lg bg-[#6A4FC4] text-white text-sm font-medium"
-                      >
-                        <span>{t("widgetStopRecording")}</span>
-                        <span className="font-mono text-xs">
-                          {t("widgetRecordingStatus", { seconds: recordSeconds })}
-                        </span>
-                      </button>
-                    )}
-                  </div>
-                  <span className="text-xs text-[#6B6B6B]">{t("cloudAiNotice")}</span>
-                </div>
-
-                {pendingTranscript && pendingTranscript.fieldKey === currentQuestion.id && (
-                  <div className="p-3 rounded-lg bg-white border border-[#8F6FE0] space-y-2.5">
-                    <label
-                      htmlFor={`${widgetId}-transcript-edit`}
-                      className="block text-xs font-semibold text-[#111111]"
-                    >
-                      {t("widgetTranscriptConfirmTitle")}
-                    </label>
-                    <input
-                      id={`${widgetId}-transcript-edit`}
-                      type="text"
-                      value={pendingTranscript.value}
-                      onChange={(e) =>
-                        setPendingTranscript({ ...pendingTranscript, value: e.target.value })
-                      }
-                      className="w-full min-h-[40px] px-3 rounded-lg border border-[#E7E7E4] text-sm"
-                    />
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          updateAnswer(currentQuestion.id, pendingTranscript.value);
-                          setPendingTranscript(null);
+                        onStop={stopVoiceRecording}
+                        labels={{
+                          speakLabel: t("widgetSpeakAnswerLabel"),
+                          listeningLabel: t("widgetVoiceListeningLabel"),
+                          processingLabel: t("widgetVoiceProcessingLabel"),
                         }}
-                        className="px-3 min-h-[36px] rounded-lg bg-[#111111] text-white text-xs font-medium"
-                      >
-                        {t("widgetTranscriptUse")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPendingTranscript(null)}
-                        className="px-3 min-h-[36px] rounded-lg border border-[#E7E7E4] text-xs font-medium"
-                      >
-                        {t("widgetTranscriptDiscard")}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-          {/* TEXT INPUT */}
-          {currentQuestion.type === "text" && (
-            <div>
-              <label htmlFor={getFieldDomId(currentQuestion.id)} className="sr-only">
-                {primaryLabel}
-              </label>
-              <input
-                ref={(el) => {
-                  textInputRef.current = el;
-                }}
-                id={getFieldDomId(currentQuestion.id)}
-                type="text"
-                disabled={readOnly}
-                placeholder={currentQuestion.placeholder?.[lang] || ""}
-                value={String(answers[currentQuestion.id] ?? "")}
-                onChange={(e) => updateAnswer(currentQuestion.id, e.target.value)}
-                aria-invalid={currentErrorMap.has(getFieldDomId(currentQuestion.id))}
-                aria-describedby={
-                  currentErrorMap.has(getFieldDomId(currentQuestion.id))
-                    ? `${getFieldDomId(currentQuestion.id)}-err`
-                    : undefined
-                }
-                className="w-full min-h-[46px] px-4 rounded-xl border border-[#E7E7E4] text-base text-[#111111] bg-white"
-              />
-              {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                <p id={`${getFieldDomId(currentQuestion.id)}-err`} className="mt-2 text-sm text-red-700 font-medium">
-                  {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* EMAIL INPUT */}
-          {currentQuestion.type === "email" && (
-            <div>
-              <label htmlFor={getFieldDomId(currentQuestion.id)} className="sr-only">
-                {primaryLabel}
-              </label>
-              <input
-                ref={(el) => {
-                  textInputRef.current = el;
-                }}
-                id={getFieldDomId(currentQuestion.id)}
-                type="email"
-                disabled={readOnly}
-                placeholder={currentQuestion.placeholder?.[lang] || "name@example.com"}
-                value={String(answers[currentQuestion.id] ?? "")}
-                onChange={(e) => updateAnswer(currentQuestion.id, e.target.value)}
-                aria-invalid={currentErrorMap.has(getFieldDomId(currentQuestion.id))}
-                aria-describedby={
-                  currentErrorMap.has(getFieldDomId(currentQuestion.id))
-                    ? `${getFieldDomId(currentQuestion.id)}-err`
-                    : undefined
-                }
-                className="w-full min-h-[46px] px-4 rounded-xl border border-[#E7E7E4] text-base text-[#111111] bg-white"
-              />
-              {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                <p id={`${getFieldDomId(currentQuestion.id)}-err`} className="mt-2 text-sm text-red-700 font-medium">
-                  {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* NUMBER INPUT */}
-          {currentQuestion.type === "number" && (
-            <div>
-              <label htmlFor={getFieldDomId(currentQuestion.id)} className="sr-only">
-                {primaryLabel}
-              </label>
-              <input
-                ref={(el) => {
-                  textInputRef.current = el;
-                }}
-                id={getFieldDomId(currentQuestion.id)}
-                type="text"
-                inputMode="numeric"
-                disabled={readOnly}
-                placeholder={currentQuestion.placeholder?.[lang] || ""}
-                value={String(answers[currentQuestion.id] ?? "")}
-                onChange={(e) => updateAnswer(currentQuestion.id, e.target.value.replace(/[^\d.-]/g, ""))}
-                aria-invalid={currentErrorMap.has(getFieldDomId(currentQuestion.id))}
-                aria-describedby={
-                  currentErrorMap.has(getFieldDomId(currentQuestion.id))
-                    ? `${getFieldDomId(currentQuestion.id)}-err`
-                    : undefined
-                }
-                className="w-full min-h-[46px] px-4 rounded-xl border border-[#E7E7E4] text-base font-mono text-[#111111] bg-white"
-              />
-              {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                <p id={`${getFieldDomId(currentQuestion.id)}-err`} className="mt-2 text-sm text-red-700 font-medium">
-                  {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* YES / NO INPUT */}
-          {currentQuestion.type === "yes-no" && (
-            <div className="space-y-3">
-              {renderSpeakChoiceButton(
-                {
-                  ...currentQuestion,
-                  options: [
-                    {
-                      value: "yes",
-                      label: currentQuestion.options?.[0]?.label ?? {
-                        en: translations.en.yesButton,
-                        am: translations.am.yesButton,
-                      },
-                    },
-                    {
-                      value: "no",
-                      label: currentQuestion.options?.[1]?.label ?? {
-                        en: translations.en.noButton,
-                        am: translations.am.noButton,
-                      },
-                    },
-                  ],
-                },
-                false
-              )}
-              <div id={getFieldDomId(currentQuestion.id)} className="grid grid-cols-2 gap-3">
-                {[
-                  {
-                    value: "yes",
-                    label: currentQuestion.options?.[0]?.label[lang] || t("yesButton"),
-                  },
-                  {
-                    value: "no",
-                    label: currentQuestion.options?.[1]?.label[lang] || t("noButton"),
-                  },
-                ].map((opt) => {
-                  const selected = answers[currentQuestion.id] === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      disabled={readOnly}
-                      aria-pressed={selected}
-                      onClick={() => updateAnswer(currentQuestion.id, opt.value)}
-                      style={selected ? { borderColor: effectiveAccent } : undefined}
-                      className={`min-h-[54px] px-4 rounded-xl border text-base font-semibold flex items-center justify-center gap-2 transition-colors ${
-                        selected
-                          ? "bg-[#EEEBF8] text-[#111111]"
-                          : "bg-white border-[#E7E7E4] text-[#111111] hover:bg-[#F5F5F3]"
-                      }`}
-                    >
-                      {selected && <CheckIcon size={16} />}
-                      <span>{opt.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                <p className="mt-2 text-sm text-red-700 font-medium">
-                  {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* INFO SCREEN */}
-          {currentQuestion.type === "info" && (
-            <div className="p-4 rounded-xl bg-[#F5F5F3] border border-[#E7E7E4] text-sm text-[#111111] leading-relaxed">
-              {currentQuestion.hint?.[lang] || currentQuestion.label[lang]}
-            </div>
-          )}
-
-          {/* CONSENT STEP */}
-          {currentQuestion.type === "consent" && (
-            <div>
-              <label className="flex items-start gap-3 p-4 rounded-xl bg-[#F5F5F3] border border-[#E7E7E4] cursor-pointer">
-                <input
-                  id={getFieldDomId(currentQuestion.id)}
-                  type="checkbox"
-                  disabled={readOnly}
-                  checked={Boolean(answers[currentQuestion.id])}
-                  onChange={(e) => updateAnswer(currentQuestion.id, e.target.checked)}
-                  style={{ accentColor: effectiveAccent }}
-                  className="mt-1 w-5 h-5"
-                />
-                <span className="text-sm text-[#111111] font-medium">
-                  {currentQuestion.label[lang]}
-                </span>
-              </label>
-              {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                <p className="mt-2 text-sm text-red-700 font-medium">
-                  {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* PHONE INPUT */}
-          {currentQuestion.type === "phone" && (
-            <div>
-              <label htmlFor={getFieldDomId(currentQuestion.id)} className="sr-only">
-                {primaryLabel}
-              </label>
-              <input
-                ref={(el) => {
-                  textInputRef.current = el;
-                }}
-                id={getFieldDomId(currentQuestion.id)}
-                type="tel"
-                inputMode="numeric"
-                disabled={readOnly}
-                placeholder={currentQuestion.placeholder?.[lang] || "091 234 5678"}
-                value={formatPhoneGrouped(String(answers[currentQuestion.id] ?? ""))}
-                onChange={(e) => updateAnswer(currentQuestion.id, normalizePhoneDigits(e.target.value))}
-                aria-invalid={currentErrorMap.has(getFieldDomId(currentQuestion.id))}
-                aria-describedby={
-                  currentErrorMap.has(getFieldDomId(currentQuestion.id))
-                    ? `${getFieldDomId(currentQuestion.id)}-err`
-                    : undefined
-                }
-                className="w-full min-h-[46px] px-4 rounded-xl border border-[#E7E7E4] text-base font-mono tracking-wide text-[#111111] bg-white"
-              />
-              {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                <p id={`${getFieldDomId(currentQuestion.id)}-err`} className="mt-2 text-sm text-red-700 font-medium">
-                  {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* DATE OF BIRTH (ETHIOPIAN / GREGORIAN — A3 empty defaults, B8 text+numeric & real month lengths) */}
-          {currentQuestion.type === "date" && (
-            <div className="space-y-4">
-              <div
-                className="inline-flex rounded-lg border border-[#E7E7E4] bg-[#F5F5F3] p-0.5"
-                role="group"
-                aria-label={t("widgetCalGroupLabel")}
-              >
-                <button
-                  type="button"
-                  onClick={() => updateAnswer("dob_calendar", "eth")}
-                  aria-pressed={answers.dob_calendar !== "greg"}
-                  className={`px-3.5 min-h-[38px] rounded-md text-xs font-semibold ${
-                    answers.dob_calendar !== "greg" ? "bg-white text-[#111111] shadow-xs" : "text-[#6B6B6B]"
-                  }`}
-                >
-                  {t("widgetCalEth")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => updateAnswer("dob_calendar", "greg")}
-                  aria-pressed={answers.dob_calendar === "greg"}
-                  className={`px-3.5 min-h-[38px] rounded-md text-xs font-semibold ${
-                    answers.dob_calendar === "greg" ? "bg-white text-[#111111] shadow-xs" : "text-[#6B6B6B]"
-                  }`}
-                >
-                  {t("widgetCalGreg")}
-                </button>
-              </div>
-
-              {answers.dob_calendar !== "greg" ? (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label htmlFor={getFieldDomId("dob_eth_day")} className="block text-xs font-medium text-[#6B6B6B] mb-1">
-                        {t("widgetCalDay")}
-                      </label>
-                      <input
-                        id={getFieldDomId("dob_eth_day")}
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        maxLength={2}
-                        disabled={readOnly}
-                        placeholder="DD"
-                        value={String(answers.dob_eth_day ?? "")}
-                        onChange={(e) => updateAnswer("dob_eth_day", e.target.value.replace(/\D/g, "").slice(0, 2))}
-                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#E7E7E4] text-base"
                       />
-                    </div>
-                    <div>
-                      <label htmlFor={getFieldDomId("dob_eth_month")} className="block text-xs font-medium text-[#6B6B6B] mb-1">
-                        {t("widgetCalMonth")}
-                      </label>
-                      <select
-                        id={getFieldDomId("dob_eth_month")}
-                        disabled={readOnly}
-                        value={String(answers.dob_eth_month ?? "")}
-                        onChange={(e) => updateAnswer("dob_eth_month", e.target.value)}
-                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#E7E7E4] bg-white text-base"
-                      >
-                        <option value="">{t("widgetCalChooseMonth")}</option>
-                        {ETHIOPIAN_MONTHS.map((m) => (
-                          <option key={m.num} value={String(m.num)}>
-                            {lang === "am" ? m.am : m.en}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label htmlFor={getFieldDomId("dob_eth_year")} className="block text-xs font-medium text-[#6B6B6B] mb-1">
-                        {t("widgetCalYear")}
-                      </label>
-                      <input
-                        id={getFieldDomId("dob_eth_year")}
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        maxLength={4}
-                        disabled={readOnly}
-                        placeholder={`${ethBounds.min}–${ethBounds.max}`}
-                        value={String(answers.dob_eth_year ?? "")}
-                        onChange={(e) => updateAnswer("dob_eth_year", e.target.value.replace(/\D/g, "").slice(0, 4))}
-                        aria-invalid={currentErrorMap.has(getFieldDomId("dob_eth_year"))}
-                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#E7E7E4] text-base"
-                      />
-                    </div>
-                  </div>
-                  {gregConverted && (
-                    <p className="text-sm text-[#6B6B6B]">
-                      {t("widgetCalConvertedGreg")}{" "}
-                      <span className="font-medium text-[#111111]">
-                        {formatGregorianDate(gregConverted)}
-                      </span>
-                    </p>
-                  )}
-                  {currentErrorMap.has(getFieldDomId("dob_eth_year")) && (
-                    <p className="text-sm text-red-700 font-medium">
-                      {currentErrorMap.get(getFieldDomId("dob_eth_year"))}
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label htmlFor={getFieldDomId("dob_greg_day")} className="block text-xs font-medium text-[#6B6B6B] mb-1">
-                        {t("widgetCalDay")}
-                      </label>
-                      <input
-                        id={getFieldDomId("dob_greg_day")}
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        maxLength={2}
-                        disabled={readOnly}
-                        placeholder="DD"
-                        value={String(answers.dob_greg_day ?? "")}
-                        onChange={(e) => updateAnswer("dob_greg_day", e.target.value.replace(/\D/g, "").slice(0, 2))}
-                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#E7E7E4] text-base"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor={getFieldDomId("dob_greg_month")} className="block text-xs font-medium text-[#6B6B6B] mb-1">
-                        {t("widgetCalMonth")}
-                      </label>
-                      <select
-                        id={getFieldDomId("dob_greg_month")}
-                        disabled={readOnly}
-                        value={String(answers.dob_greg_month ?? "")}
-                        onChange={(e) => updateAnswer("dob_greg_month", e.target.value)}
-                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#E7E7E4] bg-white text-base"
-                      >
-                        <option value="">{t("widgetCalChooseMonth")}</option>
-                        {GREGORIAN_MONTHS_EN.map((m, idx) => (
-                          <option key={m} value={String(idx + 1)}>
-                            {m}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label htmlFor={getFieldDomId("dob_greg_year")} className="block text-xs font-medium text-[#6B6B6B] mb-1">
-                        {t("widgetCalYear")}
-                      </label>
-                      <input
-                        id={getFieldDomId("dob_greg_year")}
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        maxLength={4}
-                        disabled={readOnly}
-                        placeholder={`${gregBounds.min}–${gregBounds.max}`}
-                        value={String(answers.dob_greg_year ?? "")}
-                        onChange={(e) => updateAnswer("dob_greg_year", e.target.value.replace(/\D/g, "").slice(0, 4))}
-                        aria-invalid={currentErrorMap.has(getFieldDomId("dob_greg_year"))}
-                        className="w-full min-h-[44px] px-3 rounded-xl border border-[#E7E7E4] text-base"
-                      />
-                    </div>
-                  </div>
-                  {ethConverted && (
-                    <p className="text-sm text-[#6B6B6B]">
-                      {t("widgetCalConvertedEth")}{" "}
-                      <span className="font-medium text-[#111111]">
-                        {formatEthiopianDate(ethConverted, lang)}
-                      </span>
-                    </p>
-                  )}
-                  {currentErrorMap.has(getFieldDomId("dob_greg_year")) && (
-                    <p className="text-sm text-red-700 font-medium">
-                      {currentErrorMap.get(getFieldDomId("dob_greg_year"))}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* SINGLE CHOICE (with voice option matching B5) */}
-          {currentQuestion.type === "choice" && currentQuestion.options && (
-            <div className="space-y-3">
-              {renderSpeakChoiceButton(currentQuestion, false)}
-              <fieldset>
-                <legend className="sr-only">{primaryLabel}</legend>
-                <div
-                  id={getFieldDomId(currentQuestion.id)}
-                  className={`grid gap-2.5 ${
-                    currentQuestion.options.length > 4 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"
-                  }`}
-                >
-                  {currentQuestion.options.map((opt) => {
-                    const selected = answers[currentQuestion.id] === opt.value;
-                    return (
-                      <label
-                        key={opt.value}
-                        style={selected ? { borderColor: effectiveAccent } : undefined}
-                        className={`flex items-center justify-between gap-3 p-3.5 rounded-xl border cursor-pointer min-h-[48px] transition-colors ${
-                          selected
-                            ? "bg-[#EEEBF8] text-[#111111]"
-                            : "border-[#E7E7E4] bg-white hover:bg-[#F5F5F3]"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="radio"
-                            name={`${widgetId}-${currentQuestion.id}`}
-                            value={opt.value}
-                            checked={selected}
-                            disabled={readOnly}
-                            onChange={() => {
-                              updateAnswer(currentQuestion.id, opt.value);
-                              if (currentQuestion.id === "language" && (opt.value === "am" || opt.value === "en")) {
-                                setLang(opt.value);
-                              }
-                            }}
-                            style={{ accentColor: effectiveAccent }}
-                            className="w-4 h-4"
-                          />
-                          <span className="text-base font-medium">{opt.label[lang]}</span>
-                        </div>
-                        {selected && <CheckIcon size={16} className="shrink-0" />}
-                      </label>
-                    );
-                  })}
-                </div>
-                {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                  <p className="mt-2 text-sm text-red-700 font-medium">
-                    {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
-                  </p>
-                )}
-              </fieldset>
-            </div>
-          )}
-
-          {/* MULTICHOICE (with voice option matching B5) */}
-          {currentQuestion.type === "multichoice" && currentQuestion.options && (
-            <div className="space-y-3">
-              {renderSpeakChoiceButton(currentQuestion, true)}
-              <fieldset>
-                <legend className="sr-only">{primaryLabel}</legend>
-                <div className="flex flex-wrap gap-2.5" id={getFieldDomId(currentQuestion.id)}>
-                  {currentQuestion.options.map((opt) => {
-                    const list = Array.isArray(answers[currentQuestion.id])
-                      ? (answers[currentQuestion.id] as string[])
-                      : [];
-                    const selected = list.includes(opt.value);
-                    return (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        disabled={readOnly}
-                        aria-pressed={selected}
-                        onClick={() => {
-                          const next = selected
-                            ? list.filter((x) => x !== opt.value)
-                            : [...list, opt.value];
-                          updateAnswer(currentQuestion.id, next);
-                        }}
-                        style={selected ? { borderColor: effectiveAccent } : undefined}
-                        className={`px-4 min-h-[44px] rounded-xl border text-sm font-medium inline-flex items-center gap-2 transition-colors ${
-                          selected
-                            ? "bg-[#EEEBF8] text-[#111111]"
-                            : "bg-white border-[#E7E7E4] text-[#111111] hover:bg-[#F5F5F3]"
-                        }`}
-                      >
-                        {selected && <CheckIcon size={15} />}
-                        <span>{opt.label[lang]}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                  <p className="mt-2 text-sm text-red-700 font-medium">
-                    {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
-                  </p>
-                )}
-              </fieldset>
-            </div>
-          )}
-
-          {/* ID ROUTES (respects safeTemplate.idRoutes B3 and effectiveSettings.partnerReferral, voice option matching B5) */}
-          {currentQuestion.type === "id-routes" && (() => {
-            const allowedRoutes = safeTemplate.idRoutes.filter(
-              (r) => effectiveSettings.partnerReferral || r !== "partner_refer"
-            );
-            return (
-            <div className="space-y-4">
-              {renderSpeakChoiceButton(
-                {
-                  ...currentQuestion,
-                  options: (
-                    [
-                      { value: "fayda", label: { en: translations.en.heroOptFayda, am: translations.am.heroOptFayda } },
-                      { value: "refugee_id", label: { en: translations.en.heroOptRefugee, am: translations.am.heroOptRefugee } },
-                      { value: "other_document", label: { en: translations.en.heroOptOther, am: translations.am.heroOptOther } },
-                      { value: "partner_refer", label: { en: translations.en.heroOptPartner, am: translations.am.heroOptPartner } },
-                    ] as { value: IdRoute; label: { en: string; am: string } }[]
-                  ).filter((o) => allowedRoutes.includes(o.value)),
-                },
-                false
-              )}
-
-              <fieldset>
-                <legend className="sr-only">{primaryLabel}</legend>
-                <div id={getFieldDomId(currentQuestion.id)} className="grid grid-cols-1 gap-2.5">
-                  {(
-                    [
-                      { value: "fayda", label: t("heroOptFayda") },
-                      { value: "refugee_id", label: t("heroOptRefugee") },
-                      { value: "other_document", label: t("heroOptOther") },
-                      { value: "partner_refer", label: t("heroOptPartner") },
-                    ] as { value: IdRoute; label: string }[]
-                  )
-                    .filter((opt) => allowedRoutes.includes(opt.value))
-                    .map((opt) => {
-                      const selected = answers.id_route === opt.value;
-                      return (
-                        <label
-                          key={opt.value}
-                          style={selected ? { borderColor: effectiveAccent } : undefined}
-                          className={`flex items-center justify-between gap-3 p-3.5 rounded-xl border cursor-pointer min-h-[48px] ${
-                            selected
-                              ? "bg-[#EEEBF8]"
-                              : "border-[#E7E7E4] bg-white hover:bg-[#F5F5F3]"
-                          }`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <input
-                              type="radio"
-                              name={`${widgetId}-id_route`}
-                              value={opt.value}
-                              checked={selected}
-                              disabled={readOnly}
-                              onChange={() => updateAnswer("id_route", opt.value)}
-                              style={{ accentColor: effectiveAccent }}
-                              className="w-4 h-4"
-                            />
-                            <span className="text-base font-medium">{opt.label}</span>
-                          </div>
-                        </label>
-                      );
-                    })}
-                </div>
-              </fieldset>
-
-              {answers.id_route === "partner_refer" && (
-                <div className="p-4 rounded-xl bg-[#F5F5F3] border border-[#E7E7E4] space-y-4">
-                  <div>
-                    <label
-                      htmlFor={getFieldDomId("partner_org")}
-                      className="block text-sm font-medium text-[#111111] mb-1.5"
-                    >
-                      {t("widgetPartnerSelectLabel")}
-                    </label>
-                    <select
-                      id={getFieldDomId("partner_org")}
-                      disabled={readOnly}
-                      value={String(answers.partner_org ?? "")}
-                      onChange={(e) => updateAnswer("partner_org", e.target.value)}
-                      className="w-full min-h-[44px] px-3.5 rounded-xl border border-[#E7E7E4] bg-white text-sm"
-                    >
-                      <option value="">—</option>
-                      <option value="addis_accessibility">{t("widgetPartner1")}</option>
-                      <option value="refugee_support_desk">{t("widgetPartner2")}</option>
-                      <option value="community_tvet">{t("widgetPartner3")}</option>
-                    </select>
-                  </div>
-
-                  <label className="flex items-start gap-3 cursor-pointer">
-                    <input
-                      id={getFieldDomId("partner_consent")}
-                      type="checkbox"
-                      disabled={readOnly}
-                      checked={Boolean(answers.partner_consent)}
-                      onChange={(e) => updateAnswer("partner_consent", e.target.checked)}
-                      className="mt-1 w-4 h-4 accent-[#6A4FC4]"
-                    />
-                    <span className="text-sm text-[#111111]">{t("widgetPartnerConsent")}</span>
-                  </label>
-
-                  <div className="p-3 rounded-lg bg-[#E4F2EC] text-[#1F5C46] text-sm font-medium">
-                    {t("widgetPartnerNotice")}
-                  </div>
-                </div>
-              )}
-
-              {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                <p className="text-sm text-red-700 font-medium">
-                  {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
-                </p>
-              )}
-              {currentErrorMap.has(getFieldDomId("partner_consent")) && (
-                <p className="text-sm text-red-700 font-medium">
-                  {currentErrorMap.get(getFieldDomId("partner_consent"))}
-                </p>
-              )}
-            </div>
-            );
-          })()}
-
-          {/* SUPPORT NEEDS (PRIVATE BY DEFAULT — B2 default OFF, never in localStorage) */}
-          {currentQuestion.type === "support" && (
-            <div className="space-y-5">
-              {renderSpeakChoiceButton(
-                { ...currentQuestion, id: "support_needs" },
-                true
-              )}
-
-              <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-[#1F5C46] bg-[#E4F2EC] px-3 py-2 rounded-lg w-fit">
-                <LockIcon size={14} />
-                <span>{t("widgetSupportNoDiagnosis")}</span>
-              </div>
-
-              <div className="flex flex-wrap gap-2.5" id={getFieldDomId(currentQuestion.id)}>
-                {(currentQuestion.options ?? []).map((opt) => {
-                  const list = Array.isArray(answers.support_needs) ? answers.support_needs : [];
-                  const selected = list.includes(opt.value);
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      disabled={readOnly}
-                      aria-pressed={selected}
-                      onClick={() => {
-                        const next = selected
-                          ? list.filter((x) => x !== opt.value)
-                          : [...list, opt.value];
-                        updateAnswer("support_needs", next);
-                      }}
-                      className={`px-4 min-h-[44px] rounded-xl border text-sm font-medium inline-flex items-center gap-2 transition-colors ${
-                        selected
-                          ? "bg-[#EEEBF8] border-[#8F6FE0] text-[#111111]"
-                          : "bg-white border-[#E7E7E4] text-[#111111] hover:bg-[#F5F5F3]"
-                      }`}
-                    >
-                      {selected && <CheckIcon size={15} className="text-[#6A4FC4]" />}
-                      <span>{opt.label[lang]}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="p-4 rounded-xl bg-[#F5F5F3] border border-[#E7E7E4] space-y-3">
-                <div className="flex items-center gap-2 text-sm font-semibold text-[#111111]">
-                  <ShieldIcon size={16} />
-                  <span>{t("widgetSupportPrivacyTitle")}</span>
-                </div>
-                <p className="text-xs text-[#6B6B6B]">{t("widgetSupportNothingShared")}</p>
-
-                <label className="flex items-center justify-between gap-3 py-1.5 cursor-pointer">
-                  <span className="text-sm text-[#111111]">{t("widgetSupportSharePlatform")}</span>
-                  <input
-                    type="checkbox"
-                    disabled={readOnly}
-                    checked={Boolean(answers.support_share_platform)}
-                    onChange={(e) => updateAnswer("support_share_platform", e.target.checked)}
-                    className="w-5 h-5 accent-[#6A4FC4]"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between gap-3 py-1.5 cursor-pointer">
-                  <span className="text-sm text-[#111111]">{t("widgetSupportShareEmployers")}</span>
-                  <input
-                    type="checkbox"
-                    disabled={readOnly}
-                    checked={Boolean(answers.support_share_employers)}
-                    onChange={(e) => updateAnswer("support_share_employers", e.target.checked)}
-                    className="w-5 h-5 accent-[#6A4FC4]"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between gap-3 py-1.5 cursor-pointer">
-                  <span className="text-sm text-[#111111]">{t("widgetSupportSharePartner")}</span>
-                  <input
-                    type="checkbox"
-                    disabled={readOnly}
-                    checked={Boolean(answers.support_share_partner)}
-                    onChange={(e) => updateAnswer("support_share_partner", e.target.checked)}
-                    className="w-5 h-5 accent-[#6A4FC4]"
-                  />
-                </label>
-
-                <p className="text-xs text-[#6B6B6B] pt-1 border-t border-[#E7E7E4]">
-                  {t("widgetSupportSessionNote")}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* WORK STORY & SKILLS (A6: fallback never invents skills; AI suggestions require Keep) */}
-          {currentQuestion.type === "work-story" && (
-            <div className="space-y-4">
-              <div>
-                <label htmlFor={getFieldDomId(currentQuestion.id)} className="sr-only">
-                  {primaryLabel}
-                </label>
-                <textarea
-                  ref={(el) => {
+                    ) : undefined
+                  }
+                  textareaRef={(el: HTMLTextAreaElement | null) => {
                     textInputRef.current = el;
                   }}
-                  id={getFieldDomId(currentQuestion.id)}
-                  rows={4}
-                  disabled={readOnly}
-                  value={String(answers.work_story ?? "")}
-                  onChange={(e) => updateAnswer("work_story", e.target.value)}
-                  className="w-full p-4 rounded-xl border border-[#E7E7E4] text-base text-[#111111] bg-white"
+                  textareaProps={{
+                    rows: 4,
+                    disabled: readOnly,
+                    value: String(answers.work_story ?? ""),
+                    onChange: (e) => updateAnswer("work_story", e.target.value),
+                  }}
                 />
-              </div>
 
-              {canSkillsAi && !readOnly && (
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={handleExtractSkills}
-                    disabled={extractingSkills || !String(answers.work_story ?? "").trim()}
-                    className="mezgeb-btn-secondary text-sm"
-                  >
-                    {extractingSkills ? t("widgetSkillsExtracting") : t("widgetSkillsExtractBtn")}
-                  </button>
-                  <span className="text-xs text-[#6B6B6B]">{t("cloudAiNotice")}</span>
-                </div>
-              )}
-
-              {/* Pending AI suggestions requiring explicit Keep */}
-              {pendingSuggestedSkills.length > 0 && (
-                <div className="p-4 rounded-xl bg-[#EEEBF8] border border-[#D8CFF2] space-y-3">
+                {canSkillsAi && !readOnly && (
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-xs font-semibold text-[#111111]">{t("widgetSkillsSuggestedTitle")}</p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const current = Array.isArray(answers.skills) ? answers.skills : [];
-                        const merged = Array.from(
-                          new Set([...current, ...pendingSuggestedSkills.map((s) => s.name)])
-                        );
-                        updateAnswer("skills", merged);
-                        setPendingSuggestedSkills([]);
-                      }}
-                      className="px-3 min-h-[32px] rounded-lg bg-[#111111] text-white text-xs font-semibold"
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      loading={extractingSkills}
+                      loadingLabel={t("widgetSkillsExtracting")}
+                      disabled={!String(answers.work_story ?? "").trim()}
+                      disabledReason={
+                        !String(answers.work_story ?? "").trim()
+                          ? t("qWorkStoryHint")
+                          : undefined
+                      }
+                      onClick={handleExtractSkills}
                     >
-                      {t("widgetSkillsKeepAllBtn")}
-                    </button>
+                      {t("widgetSkillsExtractBtn")}
+                    </Button>
+                    <span className="text-xs text-[var(--muted)]">{t("cloudAiNotice")}</span>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {pendingSuggestedSkills.map((s, idx) => (
-                      <div
-                        key={idx}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-[#8F6FE0] text-xs"
-                      >
-                        <span className="font-medium text-[#111111]">{s.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const current = Array.isArray(answers.skills) ? answers.skills : [];
-                            if (!current.includes(s.name)) {
-                              updateAnswer("skills", [...current, s.name]);
-                            }
-                            setPendingSuggestedSkills((prev) => prev.filter((_, i) => i !== idx));
-                          }}
-                          className="px-2 py-0.5 rounded bg-[#1F5C46] text-white font-semibold"
-                        >
-                          {t("widgetSkillsKeepBtn")}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                )}
 
-              {/* Unselected checklist when AI is off, offline, or failed */}
-              {(!canSkillsAi || showSkillsFallback) && (
-                <div className="p-4 rounded-xl bg-[#F5F5F3] border border-[#E7E7E4] space-y-2.5">
-                  <p className="text-xs font-semibold text-[#6B6B6B]">{t("widgetSkillsFallbackTitle")}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      t("optCommonSkillSales"),
-                      t("optCommonSkillBookkeeping"),
-                      t("optCommonSkillCustomer"),
-                      t("optCommonSkillTailoring"),
-                      t("optCommonSkillDigital"),
-                      t("optCommonSkillTeaching"),
-                    ].map((skill) => {
-                      const list = Array.isArray(answers.skills) ? answers.skills : [];
-                      const active = list.includes(skill);
-                      return (
+                {pendingSuggestedSkills.length > 0 && (
+                  <div className="p-4 rounded-[10px] bg-[var(--lilac)] border border-[var(--accent)] space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-[var(--ink)]">
+                        {t("widgetSkillsSuggestedTitle")}
+                      </p>
+                      <Button
+                        variant="primary"
+                        size="md"
+                        onClick={() => {
+                          const current = Array.isArray(answers.skills) ? answers.skills : [];
+                          const merged = Array.from(
+                            new Set([...current, ...pendingSuggestedSkills.map((s) => s.name)])
+                          );
+                          updateAnswer("skills", merged);
+                          setPendingSuggestedSkills([]);
+                        }}
+                      >
+                        {t("widgetSkillsKeepAllBtn")}
+                      </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {pendingSuggestedSkills.map((s, idx) => (
+                        <div
+                          key={idx}
+                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[6px] bg-[var(--paper)] border border-[var(--line-strong)] text-sm"
+                        >
+                          <span className="font-medium text-[var(--ink)]">{s.name}</span>
+                          <Button
+                            variant="secondary"
+                            size="md"
+                            onClick={() => {
+                              const current = Array.isArray(answers.skills) ? answers.skills : [];
+                              if (!current.includes(s.name)) {
+                                updateAnswer("skills", [...current, s.name]);
+                              }
+                              setPendingSuggestedSkills((prev) => prev.filter((_, i) => i !== idx));
+                            }}
+                          >
+                            {t("widgetSkillsKeepBtn")}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {(!canSkillsAi || showSkillsFallback) && (
+                  <div className="p-4 rounded-[10px] bg-[var(--stone)] border border-[var(--line)] space-y-2.5">
+                    <p className="text-sm font-medium text-[var(--ink)]">
+                      {t("widgetSkillsFallbackTitle")}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        t("optCommonSkillSales"),
+                        t("optCommonSkillBookkeeping"),
+                        t("optCommonSkillCustomer"),
+                        t("optCommonSkillTailoring"),
+                        t("optCommonSkillDigital"),
+                        t("optCommonSkillTeaching"),
+                      ].map((skill) => {
+                        const list = Array.isArray(answers.skills) ? answers.skills : [];
+                        const active = list.includes(skill);
+                        return (
+                          <button
+                            key={skill}
+                            type="button"
+                            disabled={readOnly}
+                            aria-pressed={active}
+                            onClick={() => {
+                              const next = active
+                                ? list.filter((s) => s !== skill)
+                                : [...list, skill];
+                              updateAnswer("skills", next);
+                            }}
+                            className={`px-3.5 min-h-[44px] rounded-[6px] border text-sm font-medium cursor-pointer ${
+                              active
+                                ? "bg-[var(--lilac)] border-2 border-[var(--accent)] text-[var(--ink)]"
+                                : "bg-[var(--paper)] border-[var(--line-strong)] text-[var(--ink)]"
+                            }`}
+                          >
+                            {active ? `✓ ${skill}` : `+ ${skill}`}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {Array.isArray(answers.skills) && answers.skills.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-[var(--muted)]">
+                      {t("widgetSkillsSavedTitle")}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {answers.skills.map((skill) => (
                         <button
                           key={skill}
                           type="button"
                           disabled={readOnly}
-                          aria-pressed={active}
-                          onClick={() => {
-                            const next = active ? list.filter((s) => s !== skill) : [...list, skill];
-                            updateAnswer("skills", next);
-                          }}
-                          className={`px-3 min-h-[38px] rounded-full border text-xs font-medium ${
-                            active
-                              ? "bg-[#EEEBF8] border-[#8F6FE0] text-[#111111]"
-                              : "bg-white border-[#E7E7E4] text-[#111111]"
-                          }`}
+                          onClick={() =>
+                            updateAnswer(
+                              "skills",
+                              (answers.skills ?? []).filter((s) => s !== skill)
+                            )
+                          }
+                          aria-label={t("widgetSkillsRemoveLabel", { skill })}
+                          className="px-3 min-h-[40px] rounded-[6px] bg-[var(--lilac)] border border-[var(--accent)] text-sm font-medium text-[var(--ink)] inline-flex items-center gap-1.5 cursor-pointer"
                         >
-                          {active ? `✓ ${skill}` : `+ ${skill}`}
+                          <span>{skill}</span>
+                          <X size={14} strokeWidth={1.75} aria-hidden="true" />
                         </button>
-                      );
-                    })}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Saved skills on profile */}
-              {Array.isArray(answers.skills) && answers.skills.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold text-[#6B6B6B]">{t("widgetSkillsSavedTitle")}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {answers.skills.map((skill) => (
-                      <button
-                        key={skill}
-                        type="button"
-                        disabled={readOnly}
-                        onClick={() =>
-                          updateAnswer(
-                            "skills",
-                            (answers.skills ?? []).filter((s) => s !== skill)
-                          )
+                {!readOnly && (
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      value={customSkillInput}
+                      onChange={(e) => setCustomSkillInput(e.target.value)}
+                      placeholder={t("widgetSkillsAddPlaceholder")}
+                      aria-label={t("widgetSkillsAddPlaceholder")}
+                      className="flex-1 min-h-[48px] px-3.5 rounded-[6px] border border-[var(--line-strong)] bg-[var(--paper)] text-base"
+                    />
+                    <Button
+                      variant="secondary"
+                      size="lg"
+                      onClick={() => {
+                        const trimmed = customSkillInput.trim();
+                        if (!trimmed) return;
+                        const list = Array.isArray(answers.skills) ? answers.skills : [];
+                        if (!list.includes(trimmed)) {
+                          updateAnswer("skills", [...list, trimmed]);
                         }
-                        className="px-3 min-h-[36px] rounded-full bg-[#EEEBF8] border border-[#8F6FE0] text-xs font-medium text-[#111111] inline-flex items-center gap-1.5"
-                        aria-label={t("widgetSkillsRemoveLabel", { skill })}
-                      >
-                        <span>{skill}</span>
-                        <span aria-hidden="true">×</span>
-                      </button>
-                    ))}
+                        setCustomSkillInput("");
+                      }}
+                    >
+                      {t("widgetSkillsAddBtn")}
+                    </Button>
                   </div>
-                </div>
-              )}
-
-              {!readOnly && (
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={customSkillInput}
-                    onChange={(e) => setCustomSkillInput(e.target.value)}
-                    placeholder={t("widgetSkillsAddPlaceholder")}
-                    aria-label={t("widgetSkillsAddPlaceholder")}
-                    className="flex-1 min-h-[42px] px-3.5 rounded-lg border border-[#E7E7E4] text-sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const trimmed = customSkillInput.trim();
-                      if (!trimmed) return;
-                      const list = Array.isArray(answers.skills) ? answers.skills : [];
-                      if (!list.includes(trimmed)) {
-                        updateAnswer("skills", [...list, trimmed]);
-                      }
-                      setCustomSkillInput("");
-                    }}
-                    className="mezgeb-btn-secondary text-sm"
-                  >
-                    {t("widgetSkillsAddBtn")}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      ) : (
-        /* REVIEW AND CONFIRM STEP */
-        <div className="space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-xl md:text-2xl font-semibold text-[#111111]">{t("widgetReviewTitle")}</h2>
-            {!readOnly && !ephemeralPreview && (
-              <button
-                type="button"
-                onClick={() => {
-                  safeRemoveStorage(storageKey);
-                  setDeviceClearedNotice(true);
-                  announce(t("widgetDeviceClearedNotice"));
-                }}
-                className="text-xs font-medium text-red-700 underline min-h-[36px] px-2"
-              >
-                {t("widgetClearDeviceBtn")}
-              </button>
+                )}
+              </div>
             )}
           </div>
+        ) : (
+          /* REVIEW AND CONFIRM STEP */
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-[var(--muted)]">{t("widgetReviewTitle")}</p>
+              {!readOnly && !ephemeralPreview && (
+                <Button
+                  variant="quiet"
+                  size="md"
+                  onClick={() => {
+                    safeRemoveStorage(storageKey);
+                    setDeviceClearedNotice(true);
+                    announce(t("widgetDeviceClearedNotice"));
+                  }}
+                >
+                  {t("widgetClearDeviceBtn")}
+                </Button>
+              )}
+            </div>
 
-          {deviceClearedNotice && (
-            <p role="status" className="text-xs text-[#1F5C46] bg-[#E4F2EC] p-2.5 rounded-lg">
-              {t("widgetDeviceClearedNotice")}
-            </p>
-          )}
+            {deviceClearedNotice && (
+              <Banner variant="success">{t("widgetDeviceClearedNotice")}</Banner>
+            )}
 
-          <dl className="divide-y divide-[#E7E7E4] border-t border-b border-[#E7E7E4]">
-            {visibleQuestions
-              .filter((q) => q.type !== "info")
-              .map((q) => {
-                const idx = visibleQuestions.findIndex((vq) => vq.id === q.id);
-                let displayVal = "—";
-                if (q.type === "date") {
-                  if (answers.dob_calendar === "greg" && ethConverted) {
-                    displayVal = formatGregorianDate({
-                      year: gregYearNum,
-                      month: gregMonthNum,
-                      day: gregDayNum,
-                    });
-                  } else if (answers.dob_calendar !== "greg" && gregConverted) {
-                    displayVal = `${formatEthiopianDate(
-                      { year: ethYearNum, month: ethMonthNum, day: ethDayNum },
-                      lang
-                    )} (${formatGregorianDate(gregConverted)})`;
+            <dl className="divide-y divide-[var(--line)] border-t border-b border-[var(--line)]">
+              {visibleQuestions
+                .filter((q) => q.type !== "info")
+                .map((q) => {
+                  const idx = visibleQuestions.findIndex((vq) => vq.id === q.id);
+                  let displayVal = "—";
+                  if (q.type === "date") {
+                    if (answers.dob_calendar === "greg" && ethConverted) {
+                      const gregStr = formatGregorianDate({
+                        year: gregYearNum,
+                        month: gregMonthNum,
+                        day: gregDayNum,
+                      });
+                      const ethStr = formatEthiopianDate(ethConverted, lang);
+                      displayVal = lang === "am" ? `${ethStr} (${gregStr})` : gregStr;
+                    } else if (answers.dob_calendar !== "greg" && gregConverted) {
+                      displayVal = `${formatEthiopianDate(
+                        { year: ethYearNum, month: ethMonthNum, day: ethDayNum },
+                        lang
+                      )} (${formatGregorianDate(gregConverted)})`;
+                    }
+                  } else if (q.type === "choice") {
+                    const opt = q.options?.find((o) => o.value === answers[q.id]);
+                    displayVal = opt ? opt.label[lang] : String(answers[q.id] ?? "—");
+                  } else if (q.type === "yes-no") {
+                    if (answers[q.id] === "yes")
+                      displayVal = q.options?.[0]?.label[lang] || t("yesButton");
+                    else if (answers[q.id] === "no")
+                      displayVal = q.options?.[1]?.label[lang] || t("noButton");
+                  } else if (q.type === "consent") {
+                    displayVal = answers[q.id] ? t("yesButton") : t("noButton");
+                  } else if (q.type === "phone") {
+                    displayVal = answers[q.id]
+                      ? formatPhoneGrouped(String(answers[q.id]))
+                      : "—";
+                  } else if (q.type === "id-routes") {
+                    displayVal = answers.id_route
+                      ? answers.id_route === "partner_refer"
+                        ? t("widgetPartnerNotice")
+                        : String(answers.id_route)
+                      : "—";
+                  } else if (q.type === "support") {
+                    const list = Array.isArray(answers.support_needs)
+                      ? answers.support_needs
+                      : [];
+                    displayVal = list.length > 0 ? list.join(", ") : "—";
+                  } else if (q.type === "work-story") {
+                    const list = Array.isArray(answers.skills) ? answers.skills : [];
+                    displayVal =
+                      list.length > 0 ? list.join(", ") : String(answers.work_story || "—");
+                  } else if (Array.isArray(answers[q.id])) {
+                    displayVal = (answers[q.id] as string[]).join(", ") || "—";
+                  } else if (answers[q.id]) {
+                    displayVal = String(answers[q.id]);
                   }
-                } else if (q.type === "choice") {
-                  const opt = q.options?.find((o) => o.value === answers[q.id]);
-                  displayVal = opt ? opt.label[lang] : String(answers[q.id] ?? "—");
-                } else if (q.type === "yes-no") {
-                  if (answers[q.id] === "yes") displayVal = q.options?.[0]?.label[lang] || t("yesButton");
-                  else if (answers[q.id] === "no") displayVal = q.options?.[1]?.label[lang] || t("noButton");
-                } else if (q.type === "consent") {
-                  displayVal = answers[q.id] ? t("yesButton") : t("noButton");
-                } else if (q.type === "phone") {
-                  displayVal = answers[q.id] ? formatPhoneGrouped(String(answers[q.id])) : "—";
-                } else if (q.type === "id-routes") {
-                  displayVal = answers.id_route
-                    ? answers.id_route === "partner_refer"
-                      ? `${t("heroOptPartner")} (partner_pending)`
-                      : String(answers.id_route)
-                    : "—";
-                } else if (q.type === "support") {
-                  const list = Array.isArray(answers.support_needs) ? answers.support_needs : [];
-                  displayVal = list.length > 0 ? list.join(", ") : "—";
-                } else if (q.type === "work-story") {
-                  const list = Array.isArray(answers.skills) ? answers.skills : [];
-                  displayVal = list.length > 0 ? list.join(", ") : String(answers.work_story || "—");
-                } else if (Array.isArray(answers[q.id])) {
-                  displayVal = (answers[q.id] as string[]).join(", ") || "—";
-                } else if (answers[q.id]) {
-                  displayVal = String(answers[q.id]);
-                }
 
-                return (
-                  <div key={q.id} className="py-3.5 flex items-start justify-between gap-4">
-                    <div>
-                      <dt className="text-xs font-medium text-[#6B6B6B]">{q.label[lang]}</dt>
-                      <dd className="text-sm font-medium text-[#111111] mt-0.5">{displayVal}</dd>
+                  return (
+                    <div key={q.id} className="py-3.5 flex items-start justify-between gap-4">
+                      <div className="min-w-0 space-y-1">
+                        <dt className="text-sm font-medium text-[var(--muted)]">
+                          {q.label[lang]}
+                        </dt>
+                        <dd className="text-base font-medium text-[var(--ink)] flex flex-wrap items-center gap-2">
+                          <span>{displayVal}</span>
+                          {q.type === "support" && !answers.support_share_platform && (
+                            <Badge variant="neutral">{t("widgetSupportPrivateBadge")}</Badge>
+                          )}
+                        </dd>
+                      </div>
+                      <Button
+                        variant="quiet"
+                        size="md"
+                        onClick={() => {
+                          setReturnToReviewAfterEdit(true);
+                          setStepIndex(idx);
+                          focusNewQuestionHeading(idx + 1);
+                        }}
+                      >
+                        {t("widgetChange")}
+                      </Button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setStepIndex(idx)}
-                      className="text-xs font-semibold text-[#6A4FC4] underline min-h-[36px] px-2 shrink-0"
-                    >
-                      {t("widgetChange")}
-                    </button>
-                  </div>
-                );
-              })}
-          </dl>
+                  );
+                })}
+            </dl>
 
-          <label className="flex items-start gap-3 p-4 rounded-xl bg-[#F5F5F3] border border-[#E7E7E4] cursor-pointer">
-            <input
-              id={getFieldDomId("consent_accepted")}
-              type="checkbox"
-              disabled={readOnly}
-              checked={Boolean(answers.consent_accepted)}
-              onChange={(e) => updateAnswer("consent_accepted", e.target.checked)}
-              style={{ accentColor: effectiveAccent }}
-              className="mt-1 w-4 h-4"
-            />
-            <span className="text-sm text-[#111111] font-medium">{safeTemplate.consent[lang]}</span>
-          </label>
+            {assistedMode && (
+              <Banner variant="warning">
+                <p className="font-semibold">{t("widgetAssistedSelfConsentTitle")}</p>
+                <p className="text-sm mt-0.5">{t("widgetAssistedSelfConsentBody")}</p>
+              </Banner>
+            )}
 
-          {currentErrorMap.has(getFieldDomId("consent_accepted")) && (
-            <p className="text-sm text-red-700 font-medium">
-              {currentErrorMap.get(getFieldDomId("consent_accepted"))}
-            </p>
-          )}
-        </div>
-      )}
+            <div className="space-y-2">
+              <label className="flex items-start gap-3 p-4 rounded-[10px] bg-[var(--stone)] border border-[var(--line-strong)] cursor-pointer min-h-[56px]">
+                <input
+                  id={getFieldDomId("consent_accepted")}
+                  type="checkbox"
+                  disabled={readOnly}
+                  checked={Boolean(answers.consent_accepted)}
+                  onChange={(e) => updateAnswer("consent_accepted", e.target.checked)}
+                  className="mt-1 w-5 h-5 accent-[var(--accent)]"
+                />
+                <span className="text-base text-[var(--ink)] font-medium">
+                  {safeTemplate.consent[lang]}
+                </span>
+              </label>
 
-      {/* Navigation Footer */}
-      <div className="pt-4 border-t border-[#E7E7E4] flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          {!singleQuestionMode && stepIndex > 0 && (
-            <button
-              type="button"
-              onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
-              className="mezgeb-btn-secondary"
-            >
-              {t("widgetBack")}
-            </button>
+              {currentErrorMap.has(getFieldDomId("consent_accepted")) && (
+                <p role="alert" className="text-sm font-medium text-[var(--error)]">
+                  {currentErrorMap.get(getFieldDomId("consent_accepted"))}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* FIXED BOTTOM ACTION BAR: Back (1) + Save and continue (2), both 48px */}
+        <div className="pt-4 border-t border-[var(--line)] space-y-3">
+          {currentQuestion &&
+            !currentQuestion.required &&
+            currentQuestion.skippable &&
+            currentQuestion.type !== "info" && (
+              <div className="flex justify-end">
+                <Button variant="quiet" size="md" onClick={handleSkipQuestion}>
+                  {t("widgetSkipQuestion")}
+                </Button>
+              </div>
+            )}
+
+          {builderCanvas ? (
+            <div className="grid grid-cols-3 gap-3">
+              <button
+                type="button"
+                aria-disabled="true"
+                title={builderCanvas.labels.disabledFooterTitle}
+                onClick={(e) => e.preventDefault()}
+                className="min-h-[48px] px-4 rounded-[10px] border border-[var(--line-strong)] bg-[var(--paper)] text-sm font-medium text-[var(--muted)] cursor-not-allowed"
+              >
+                {builderCanvas.labels.backLabel}
+              </button>
+              <button
+                type="button"
+                aria-disabled="true"
+                title={builderCanvas.labels.disabledFooterTitle}
+                onClick={(e) => e.preventDefault()}
+                className="col-span-2 min-h-[48px] px-4 rounded-[10px] border border-[var(--line-strong)] bg-[var(--stone)] text-sm font-semibold text-[var(--muted)] cursor-not-allowed"
+              >
+                {builderCanvas.labels.saveLabel}
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-3">
+              {!singleQuestionMode && (stepIndex > 0 || useIntroScreens) && (
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  fullWidth
+                  onClick={() => {
+                    setReturnToReviewAfterEdit(false);
+                    if (stepIndex > 0) {
+                      const prevIdx = stepIndex - 1;
+                      setStepIndex(prevIdx);
+                      focusNewQuestionHeading(prevIdx + 1);
+                    } else if (useIntroScreens) {
+                      setStage("mode");
+                    }
+                  }}
+                >
+                  {t("widgetBack")}
+                </Button>
+              )}
+
+              <div
+                className={
+                  !singleQuestionMode && (stepIndex > 0 || useIntroScreens)
+                    ? "col-span-2"
+                    : "col-span-3"
+                }
+              >
+                <Button variant="primary" size="lg" fullWidth onClick={handleNext}>
+                  {singleQuestionMode
+                    ? t("saveButton")
+                    : isReviewStep
+                      ? t("widgetConfirm")
+                      : t("widgetSaveContinue")}
+                </Button>
+              </div>
+            </div>
           )}
 
           {!readOnly && !singleQuestionMode && effectiveSettings.smsResume && (
-            <button
-              type="button"
-              onClick={() => {
-                setSmsPhone(String(answers.phone ?? ""));
-                setSmsPhoneError("");
-                setSmsGeneratedLink(null);
-                setSmsOpen((v) => !v);
-              }}
-              className="text-xs font-medium text-[#6B6B6B] hover:text-[#111111] underline min-h-[40px] px-2"
-            >
-              {t("widgetFinishLaterSms")}
-            </button>
+            <div className="pt-1">
+              <Button
+                variant="quiet"
+                size="md"
+                onClick={() => {
+                  setSmsPhone(String(answers.phone ?? ""));
+                  setSmsPhoneError("");
+                  setSmsGeneratedLink(null);
+                  setSmsOpen((v) => !v);
+                }}
+              >
+                <MessageSquare size={16} strokeWidth={1.75} aria-hidden="true" />
+                <span>{t("widgetFinishLaterSms")}</span>
+              </Button>
+            </div>
           )}
         </div>
 
-        <div className="flex items-center gap-2.5 ml-auto">
-          {currentQuestion && !currentQuestion.required && currentQuestion.skippable && currentQuestion.type !== "info" && (
-            <button
-              type="button"
-              onClick={handleSkipQuestion}
-              className="mezgeb-btn-secondary"
-            >
-              {t("widgetSkipQuestion")}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleNext}
-            className="mezgeb-btn-primary"
-            style={{ backgroundColor: effectiveAccent }}
-          >
-            {singleQuestionMode ? t("saveButton") : isReviewStep ? t("widgetConfirm") : t("widgetContinue")}
-          </button>
-        </div>
-      </div>
-
-      {/* Finish later by SMS panel (B11) */}
-      {smsOpen && (
-        <div className="p-4 rounded-xl bg-[#F5F5F3] border border-[#E7E7E4] space-y-3">
-          <p className="text-sm font-semibold text-[#111111]">{t("widgetSmsModalTitle")}</p>
-          <form onSubmit={handleSendSmsLink} className="flex flex-col sm:flex-row gap-2">
-            <div className="flex-1">
-              <label htmlFor={`${widgetId}-sms-phone`} className="block text-xs text-[#6B6B6B] mb-1">
-                {t("widgetSmsPhoneLabel")}
-              </label>
-              <input
+        {/* Finish later by SMS panel */}
+        {smsOpen && (
+          <div className="p-4 rounded-[10px] bg-[var(--stone)] border border-[var(--line)] space-y-3">
+            <p className="text-sm font-semibold text-[var(--ink)]">{t("widgetSmsModalTitle")}</p>
+            <form onSubmit={handleSendSmsLink} className="space-y-3">
+              <Field
                 id={`${widgetId}-sms-phone`}
-                type="tel"
-                inputMode="numeric"
-                placeholder="091 234 5678"
-                value={formatPhoneGrouped(smsPhone)}
-                onChange={(e) => setSmsPhone(normalizePhoneDigits(e.target.value))}
-                className="w-full min-h-[42px] px-3 rounded-lg border border-[#E7E7E4] bg-white font-mono text-sm"
+                label={t("widgetSmsPhoneLabel")}
+                error={smsPhoneError}
+                inputProps={{
+                  type: "tel",
+                  inputMode: "numeric",
+                  placeholder: "091 234 5678",
+                  value: formatPhoneGrouped(smsPhone),
+                  onChange: (e) => setSmsPhone(normalizePhoneDigits(e.target.value)),
+                }}
               />
-            </div>
-            <button type="submit" className="mezgeb-btn-primary self-end text-sm">
-              {t("widgetSmsSendBtn")}
-            </button>
-          </form>
-          {smsPhoneError && <p className="text-xs text-red-700 font-medium">{smsPhoneError}</p>}
-          {smsGeneratedLink && (
-            <div role="status" className="p-3 rounded-lg bg-[#E4F2EC] text-[#1F5C46] text-xs space-y-1">
-              <p className="font-medium">{t("widgetSmsBody")}</p>
-              <a href={smsGeneratedLink} className="font-mono underline break-all font-semibold">
-                {smsGeneratedLink}
-              </a>
-            </div>
-          )}
-        </div>
-      )}
+              <Button type="submit" variant="primary" size="md">
+                {t("widgetSmsSendBtn")}
+              </Button>
+            </form>
+
+            {smsGeneratedLink && (
+              <Banner variant="success">
+                <div className="space-y-1">
+                  <p>{t("widgetSmsBody")}</p>
+                  <a
+                    href={smsGeneratedLink}
+                    className="underline break-all font-medium text-[var(--mint-ink)]"
+                    style={{ fontFamily: "var(--font-mono)" }}
+                  >
+                    {smsGeneratedLink}
+                  </a>
+                </div>
+              </Banner>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -28,6 +28,21 @@ export const DEFAULT_TEMPLATE_SETTINGS: TemplateSettings = {
   sayItSimply: true,
 };
 
+export const ACCENT_SWATCHES = [
+  "#6A4FC4",
+  "#1F5C46",
+  "#111111",
+  "#1D4ED8",
+  "#9A3412",
+  "#7C2D12",
+];
+
+export const DEFAULT_WIDGET_THEME = {
+  accent: ACCENT_SWATCHES[0],
+  platformName: "Learnhub",
+  logoLetter: "L",
+};
+
 export const AREA_OPTIONS: QuestionOption[] = [
   { value: "addis_ketema", label: { am: am.optAreaAddisKetema, en: en.optAreaAddisKetema } },
   { value: "akaky_kaliti", label: { am: am.optAreaAkaky, en: en.optAreaAkaky } },

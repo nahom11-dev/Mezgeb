@@ -1,0 +1,416 @@
+:root {
+  /* Colour palette */
+  --ink: #111111;
+  --ink-2: #3D3935;
+  --muted: #6B6560;
+  --line: #E4E1DC;
+  --line-strong: #C9C4BD;
+  --paper: #FFFFFF;
+  --console-paper: #FAF9F6;
+  --console-line: #E7E7E4;
+  --accent-hover: #543EA6;
+  --builder-surface: #FBF9F8;
+  --sand: #F9F3EA;
+  --stone: #F5F5F3;
+  --mint: #E4F2EC;
+  --mint-ink: #1F5C46;
+  --lilac: #EEEBF8;
+  --accent: #6A4FC4;
+  --accent-soft: #8F6FE0;
+  --night: #161616;
+  --night-muted: #A8A29E;
+  --night-line: #2A2A2A;
+  --night-wordmark: #262626;
+  --error: #B42318;
+  --error-bg: #FDECEA;
+  --warn: #8A5A00;
+  --warn-bg: #FFF4DC;
+
+  /* Widget theme hook (overridable by template theme or high-contrast mode) */
+  --widget-accent: var(--accent);
+
+  /* Typography */
+  --font-sans: "Inter", "Noto Sans Ethiopic", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-dark: 28px;
+
+  /* Elevation — single floating shadow */
+  --shadow-float: 0 1px 2px rgba(17, 17, 17, 0.06), 0 8px 24px rgba(17, 17, 17, 0.08);
+}
+
+/* High-contrast theme (pure black on white, 2px borders) */
+.mezgeb-hc {
+  --ink: #000000;
+  --ink-2: #000000;
+  --muted: #000000;
+  --line: #000000;
+  --line-strong: #000000;
+  --paper: #FFFFFF;
+  --sand: #FFFFFF;
+  --stone: #FFFFFF;
+  --mint: #FFFFFF;
+  --mint-ink: #000000;
+  --lilac: #FFFFFF;
+  --accent: #000000;
+  --accent-soft: #000000;
+  --widget-accent: #000000;
+  --error: #990000;
+  --error-bg: #FFFFFF;
+  --warn: #000000;
+  --warn-bg: #FFFFFF;
+  --shadow-float: none;
+}
+
+.mezgeb-hc .mezgeb-surface,
+.mezgeb-hc input,
+.mezgeb-hc select,
+.mezgeb-hc textarea,
+.mezgeb-hc button {
+  border-width: 2px !important;
+}
+
+html {
+  font-size: 16px;
+  background-color: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  background-color: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+[lang="am"],
+html[lang="am"] body {
+  line-height: 1.8;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.15;
+}
+
+.mezgeb-display-heading:not([lang="am"]) {
+  letter-spacing: -0.02em;
+}
+
+html[lang="am"] .mezgeb-display-heading {
+  letter-spacing: 0;
+}
+
+.mezgeb-section-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+[lang="am"] .mezgeb-section-label,
+html[lang="am"] .mezgeb-section-label {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Global accessible focus ring (WCAG 2.2 AA — never removed) */
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Skip to main content link */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 12px 18px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  border-radius: 0 0 var(--radius-md) 0;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  left: 16px;
+  top: 12px;
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Shared container */
+.mezgeb-container {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
+@media (max-width: 479px) {
+  .mezgeb-container {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
+
+/* Dialog backdrop */
+dialog.mezgeb-dialog::backdrop {
+  background: rgba(17, 17, 17, 0.56);
+}
+
+/* Motion — strictly wrapped in prefers-reduced-motion: no-preference */
+/* Shadow-root embed (<mezgeb-register>): isolate from host page CSS */
+@layer base {
+  :host {
+    all: initial;
+    display: block;
+    font-family: var(--font-sans);
+    color: var(--ink);
+    font-size: 16px;
+    line-height: 1.6;
+    text-align: left;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :host [lang="am"],
+  :host [lang="am"] p,
+  :host [lang="am"] li,
+  :host [lang="am"] label,
+  :host [lang="am"] input,
+  :host [lang="am"] textarea,
+  :host [lang="am"] select,
+  :host [lang="am"] button {
+    font-family: "Noto Sans Ethiopic", "Nyala", "Ebrima", "Inter", system-ui, sans-serif;
+    line-height: 1.75;
+  }
+
+  :host label,
+  :host input,
+  :host textarea,
+  :host select,
+  :host button {
+    max-width: 100%;
+    white-space: normal;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mezgeb-transition {
+    transition-property: color, background-color, border-color, text-decoration-color;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+
+  .mezgeb-panel-transition {
+    transition-property: transform, opacity, width;
+    transition-duration: 200ms;
+    transition-timing-function: ease-out;
+  }
+
+  @keyframes mezgebWavePulse {
+    0%, 100% {
+      transform: scaleY(0.45);
+    }
+    50% {
+      transform: scaleY(1);
+    }
+  }
+
+  .mezgeb-wave-bar {
+    animation: mezgebWavePulse 900ms ease-in-out infinite;
+    transform-origin: center;
+  }
+}
+
+/* ───────────────── Template tools (gallery, builder, playground) ───────────────── */
+
+/* Work surface behind live previews: a quiet dot grid so the phone frame reads as "on the bench". */
+.mz-canvas {
+  background-color: var(--stone);
+  background-image: radial-gradient(circle at 1px 1px, #DCD8D1 1px, transparent 0);
+  background-size: 18px 18px;
+}
+.mezgeb-hc .mz-canvas {
+  background-image: none;
+}
+
+/* Phone frame that holds the real widget */
+.mz-phone {
+  border-radius: 28px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  padding: 10px;
+  box-shadow: 0 1px 0 rgba(17, 17, 17, 0.04), 0 18px 40px -18px rgba(17, 17, 17, 0.28);
+}
+.mz-phone > .mz-phone-screen {
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+.mezgeb-hc .mz-phone {
+  box-shadow: none;
+  border: 2px solid #000;
+}
+
+/* Checkbox rendered as an on/off switch. Keeps native checkbox semantics (role="switch" added in markup). */
+input[type="checkbox"].mz-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 40px;
+  height: 24px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--line-strong);
+  cursor: pointer;
+}
+input[type="checkbox"].mz-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--paper);
+  box-shadow: 0 1px 2px rgba(17, 17, 17, 0.25);
+}
+input[type="checkbox"].mz-switch:checked {
+  background: var(--ink);
+}
+input[type="checkbox"].mz-switch:checked::after {
+  left: 19px;
+}
+input[type="checkbox"].mz-switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.mezgeb-hc input[type="checkbox"].mz-switch {
+  border: 2px solid #000;
+  background: #fff;
+}
+.mezgeb-hc input[type="checkbox"].mz-switch::after {
+  background: #000;
+  top: 1px;
+  left: 1px;
+}
+.mezgeb-hc input[type="checkbox"].mz-switch:checked {
+  background: #000;
+}
+.mezgeb-hc input[type="checkbox"].mz-switch:checked::after {
+  background: #fff;
+  left: 17px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  input[type="checkbox"].mz-switch,
+  input[type="checkbox"].mz-switch::after {
+    transition: background-color 150ms ease-out, left 150ms ease-out;
+  }
+}
+
+/* Text areas that grow with their content (translations, inline edits) */
+.mz-autogrow {
+  field-sizing: content;
+  min-height: 2.75rem;
+  resize: none;
+}
+
+/* Thin scrollbars inside builder columns */
+.mz-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* ───────── Stitch landing hero ───────── */
+.mz-hero-gradient {
+  background: linear-gradient(
+    180deg,
+    #eeebf8 0%,
+    #edebed 35%,
+    #e9f0ee 65%,
+    #e4f2ec 100%
+  );
+}
+
+.mz-waveform-bar {
+  display: inline-block;
+  width: 2px;
+  background: rgba(201, 184, 242, 0.75);
+  border-radius: 9999px;
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes mzMicRipple {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 0.35;
+    }
+    50% {
+      transform: scale(1.12);
+      opacity: 0.12;
+    }
+  }
+  .mz-mic-ripple {
+    animation: mzMicRipple 2.8s ease-in-out infinite;
+  }
+}
+
+/* ───────── Templates console (dashboard + detail) ───────── */
+.mz-console-page {
+  background-color: var(--console-paper);
+  color: var(--ink);
+}
+
+.template-card-stitch {
+  border: 1px solid var(--console-line);
+  border-radius: 1rem;
+  background: var(--paper);
+  transition: border-color 150ms ease-out;
+}
+
+.template-card-stitch:hover,
+.template-card-stitch:focus-within {
+  border-color: var(--accent);
+}
+
+.template-card-stitch .card-hover-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.template-card-stitch:hover .card-hover-actions,
+.template-card-stitch:focus-within .card-hover-actions {
+  opacity: 1;
+}
+
+.mz-phone-stitch {
+  border-radius: 32px;
+  border: 1px solid var(--console-line);
+  background: var(--paper);
+  box-shadow: 0 16px 40px -12px rgba(17, 17, 17, 0.1);
+}
+
+.mz-builder-surface {
+  background-color: var(--builder-surface);
+}

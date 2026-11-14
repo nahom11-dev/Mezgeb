@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sira Board (sample site)</title>
+<style>
+  :root{
+    --ink:#1B1B1B; --muted:#5E5E5E; --line:#E3E0D8; --bg:#FBFAF7;
+    --brand:#0F6B4F; --brand-dark:#0A4A37; --chip:#E7F2EE; --note:#FFF4D6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Georgia,"Noto Serif Ethiopic",serif;color:var(--ink);background:var(--bg);line-height:1.6}
+  h1,h2,h3,.ui,button,input,select,label,nav{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Ethiopic",sans-serif}
+  a{color:var(--brand)}
+  a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #E07A00;outline-offset:2px}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+  .skip{position:absolute;left:-9999px}.skip:focus{left:12px;top:12px;background:#fff;padding:8px 12px;z-index:10}
+  .sample-note{background:var(--note);font:14px system-ui,sans-serif;padding:8px 0;text-align:center}
+  header{background:var(--brand-dark);color:#fff}
+  .bar{display:flex;align-items:center;gap:24px;min-height:64px;flex-wrap:wrap}
+  .logo{color:#fff;text-decoration:none;font:700 21px system-ui,sans-serif;letter-spacing:-0.01em}
+  nav ul{list-style:none;display:flex;gap:20px;margin:0;padding:0;flex-wrap:wrap}
+  nav a{color:#fff;text-decoration:none;font-size:15px}
+  nav a[aria-current="page"]{text-decoration:underline;text-underline-offset:6px}
+  .bar .right{margin-left:auto;display:flex;gap:10px;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 18px;border-radius:4px;border:1px solid var(--brand);background:var(--brand);color:#fff;font:600 15px system-ui,sans-serif;text-decoration:none;cursor:pointer}
+  .btn.light{background:#fff;color:var(--brand-dark);border-color:#fff}
+  .btn.ghost{background:transparent;color:var(--brand);}
+  .search{background:var(--brand-dark);padding:40px 0 56px;color:#fff}
+  .search h1{font-size:clamp(28px,4.5vw,42px);margin:0 0 20px;max-width:700px;line-height:1.2}
+  .search form{display:flex;gap:10px;flex-wrap:wrap;max-width:760px}
+  .search .field{flex:1 1 220px}
+  .search label{display:block;font-size:14px;margin-bottom:6px}
+  input,select,textarea{width:100%;min-height:44px;border:1px solid #9E9A90;border-radius:4px;padding:0 12px;font:16px system-ui,sans-serif;background:#fff;color:var(--ink)}
+  textarea{min-height:110px;padding:10px 12px}
+  section{padding:56px 0}
+  h2{font-size:26px;margin:0 0 20px}
+  .job{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:18px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .job h3{margin:0;font-size:18px}
+  .meta{font:14px system-ui,sans-serif;color:var(--muted)}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .chip{font:13px system-ui,sans-serif;background:var(--chip);color:var(--brand-dark);padding:2px 8px;border-radius:4px}
+  footer{border-top:1px solid var(--line);padding:32px 0;color:var(--muted);font:14px system-ui,sans-serif}
+  .view{display:none}.view.active{display:block}
+  .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:40px;align-items:start}
+  .slot{border:2px dashed #A6B9B1;border-radius:8px;min-height:420px;padding:24px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:8px;color:var(--muted);background:#fff;font-family:system-ui,sans-serif}
+  .slot code{background:#EEF0EC;padding:2px 6px;border-radius:4px;font-size:13px}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:8px;padding:24px}
+  .stack{display:flex;flex-direction:column;gap:14px}
+  .field label{font-weight:600;font-size:15px;display:block;margin-bottom:6px}
+  .hint{font:14px system-ui,sans-serif;color:var(--muted);font-weight:400}
+  dl{display:grid;grid-template-columns:170px 1fr;gap:8px 16px;margin:0;font-family:system-ui,sans-serif}
+  dt{color:var(--muted)}dd{margin:0}
+  .detail h1{font-size:34px;margin:0 0 6px}
+  .detail h2{font-size:20px;margin:28px 0 8px}
+  @media (max-width:640px){dl{grid-template-columns:1fr}.bar .right{margin-left:0}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+<div class="sample-note">Sample website for testing Mezgeb. Sira Board is not a real company. All jobs are made up.</div>
+
+<header>
+  <div class="wrap bar">
+    <a class="logo" href="#jobs">Sira Board</a>
+    <nav aria-label="Main">
+      <ul>
+        <li><a href="#jobs" data-nav="jobs">Find jobs</a></li>
+        <li><a href="#employers" data-nav="employers">For employers</a></li>
+        <li><a href="#profile" data-nav="profile">My profile</a></li>
+      </ul>
+    </nav>
+    <div class="right">
+      <a class="btn light" href="onboarding.html">Create job seeker profile</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- JOB LIST -->
+  <div class="view" id="view-jobs">
+    <div class="search">
+      <div class="wrap">
+        <h1>Find work near you</h1>
+        <form id="search-form" role="search">
+          <div class="field"><label for="q">Job title or skill</label><input id="q" name="q"></div>
+          <div class="field"><label for="loc">Location</label>
+            <select id="loc" name="loc"><option value="">Anywhere</option><option>Addis Ababa</option><option>Adama</option><option>Hawassa</option><option>Bahir Dar</option><option>Remote</option></select></div>
+          <div style="align-self:flex-end"><button class="btn light" type="submit">Search</button></div>
+        </form>
+      </div>
+    </div>
+    <section>
+      <div class="wrap">
+        <h2 id="results-title">Latest jobs</h2>
+        <div id="job-list" aria-live="polite"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- JOB DETAIL -->
+  <div class="view" id="view-job">
+    <section>
+      <div class="wrap detail" id="job-detail"></div>
+    </section>
+  </div>
+
+  <!-- JOB SEEKER SIGN UP -->
+  <div class="view" id="view-signup">
+    <section>
+      <div class="wrap">
+        <h1 style="font-size:34px;margin:0 0 8px">Create your job seeker profile</h1>
+        <p class="hint" style="margin:0 0 32px;font-size:16px">One profile lets you apply to any job on Sira Board.</p>
+        <div class="two">
+
+          <div class="panel">
+            <h2 style="font-size:20px">Current profile form</h2>
+            <p class="hint" style="margin-top:-12px">The site's existing form, kept for comparison.</p>
+            <form class="stack" id="seeker-form" novalidate>
+              <div class="field"><label for="s-name">Full name</label><input id="s-name" name="name" autocomplete="name"></div>
+              <div class="field"><label for="s-phone">Phone number</label><input id="s-phone" name="phone" type="tel" autocomplete="tel"></div>
+              <div class="field"><label for="s-city">City</label><input id="s-city" name="city" autocomplete="address-level2"></div>
+              <div class="field"><label for="s-skills">Skills <span class="hint">(separate with commas)</span></label><input id="s-skills" name="skills"></div>
+              <div class="field"><label for="s-exp">Work experience</label><textarea id="s-exp" name="experience"></textarea></div>
+              <div class="field"><label for="s-cv">CV <span class="hint">(PDF)</span></label><input id="s-cv" name="cv" type="file" accept="application/pdf" style="padding:8px"></div>
+              <p id="seeker-msg" role="status" class="hint"></p>
+              <button class="btn" type="submit">Save profile</button>
+            </form>
+          </div>
+
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- EMPLOYERS -->
+  <div class="view" id="view-employers">
+    <section>
+      <div class="wrap">
+        <h1 style="font-size:34px;margin:0 0 8px">Post a job and tell candidates what support you offer</h1>
+        <p class="hint" style="margin:0 0 32px;font-size:16px">Candidates can filter jobs by the support employers list.</p>
+        <div class="two">
+
+          <div class="panel">
+            <h2 style="font-size:20px">Current job posting form</h2>
+            <form class="stack" id="post-form" novalidate>
+              <div class="field"><label for="p-title">Job title</label><input id="p-title" name="title"></div>
+              <div class="field"><label for="p-company">Company name</label><input id="p-company" name="company" autocomplete="organization"></div>
+              <div class="field"><label for="p-city">Location</label><input id="p-city" name="city"></div>
+              <div class="field"><label for="p-type">Job type</label><select id="p-type" name="type"><option>Full time</option><option>Part time</option><option>Contract</option><option>Internship</option></select></div>
+              <div class="field"><label for="p-desc">Description</label><textarea id="p-desc" name="desc"></textarea></div>
+              <p id="post-msg" role="status" class="hint"></p>
+              <button class="btn" type="submit">Post job</button>
+            </form>
+          </div>
+
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- PROFILE -->
+  <div class="view" id="view-profile">
+    <section>
+      <div class="wrap">
+        <h1 style="font-size:34px;margin:0 0 24px">My profile</h1>
+        <div class="panel" id="profile-panel"></div>
+      </div>
+    </section>
+  </div>
+
+</main>
+
+<footer>
+  <div class="wrap">Sira Board · Sample site for testing. Companies and jobs are made up. · <a href="#signup">Old profile form (for comparison)</a></div>
+</footer>
+
+<script>
+  var JOBS = [
+    { id: "j1", title: "Customer support agent", company: "Sample Telecom Co.", city: "Addis Ababa", type: "Full time", support: ["Screen reader friendly", "Flexible hours"], desc: "Answer customer questions by phone and chat. Training is provided." },
+    { id: "j2", title: "Data entry clerk", company: "Sample Logistics PLC", city: "Adama", type: "Part time", support: ["Step-free office", "Extra time for tests"], desc: "Enter delivery records into a spreadsheet and check them for errors." },
+    { id: "j3", title: "Community trainer", company: "Sample Health NGO", city: "Hawassa", type: "Contract", support: ["Sign language interpreter on request"], desc: "Run short training sessions for community groups." },
+    { id: "j4", title: "Junior web developer", company: "Sample Software Studio", city: "Remote", type: "Full time", support: ["Remote work", "Flexible hours"], desc: "Build and fix pages for client websites using HTML, CSS and JavaScript." },
+    { id: "j5", title: "Shop assistant", company: "Sample Retail", city: "Bahir Dar", type: "Full time", support: [], desc: "Help customers, keep shelves stocked and handle payments." }
+  ];
+  var extraJobs = [];
+  try { extraJobs = JSON.parse(localStorage.getItem("sira_posted_jobs")) || []; } catch(e){}
+
+  function allJobs(){ return extraJobs.concat(JOBS); }
+  function jobRow(j){
+    var chips = j.support.length ? '<div class="chips">'+j.support.map(function(s){return '<span class="chip">'+s+'</span>';}).join("")+'</div>' : "";
+    return '<div class="job"><div><h3><a href="#job/'+j.id+'">'+j.title+'</a></h3><div class="meta">'+j.company+' · '+j.city+' · '+j.type+'</div>'+chips+'</div><a class="btn ghost" href="#job/'+j.id+'">View</a></div>';
+  }
+  function renderList(q, loc){
+    var list = allJobs().filter(function(j){
+      return (!q || (j.title+" "+j.desc).toLowerCase().indexOf(q.toLowerCase()) > -1) && (!loc || j.city === loc);
+    });
+    document.getElementById("results-title").textContent = (q || loc) ? list.length + " jobs found" : "Latest jobs";
+    document.getElementById("job-list").innerHTML = list.length ? list.map(jobRow).join("") : '<p>No jobs match. Try another search.</p>';
+  }
+  document.getElementById("search-form").addEventListener("submit", function(e){
+    e.preventDefault(); renderList(e.target.q.value.trim(), e.target.loc.value);
+  });
+
+  function renderDetail(id){
+    var j = allJobs().filter(function(x){return x.id === id;})[0], el = document.getElementById("job-detail");
+    if(!j){ el.innerHTML = "<p>Job not found.</p><a href='#jobs'>Back to jobs</a>"; return; }
+    el.innerHTML = '<a href="#jobs">← All jobs</a><h1 style="margin-top:16px">'+j.title+'</h1><p class="meta">'+j.company+' · '+j.city+' · '+j.type+'</p>'+
+      '<h2>About the job</h2><p>'+j.desc+'</p>'+
+      '<h2>Support the employer offers</h2>'+(j.support.length ? '<ul>'+j.support.map(function(s){return '<li>'+s+'</li>';}).join("")+'</ul>' : '<p>Not listed yet.</p>')+
+      '<h2>How to apply</h2><p>Create a job seeker profile, then apply with one click.</p><a class="btn" href="onboarding.html">Apply</a>';
+  }
+
+  var SEEKER_KEY = "sira_seeker";
+  function renderProfile(){
+    var u = null, el = document.getElementById("profile-panel");
+    try { u = JSON.parse(localStorage.getItem(SEEKER_KEY)); } catch(e){}
+    if(!u){ el.innerHTML = '<p>You do not have a profile yet.</p><a class="btn" href="onboarding.html">Create profile</a>'; return; }
+    el.innerHTML = '<dl>'+Object.keys(u).map(function(k){return '<dt>'+k+'</dt><dd>'+(u[k]||"—")+'</dd>';}).join("")+'</dl>'+
+      '<p class="hint" style="margin-top:16px">This page shows the profile the site received. Later it will show the profile from Mezgeb.</p>'+
+      '<button class="btn ghost" type="button" id="clear-profile">Delete profile</button>';
+    document.getElementById("clear-profile").onclick = function(){ try{localStorage.removeItem(SEEKER_KEY);}catch(e){} renderProfile(); };
+  }
+
+  document.getElementById("seeker-form").addEventListener("submit", function(e){
+    e.preventDefault();
+    var f = e.target, msg = document.getElementById("seeker-msg");
+    if(!f.name.value.trim() || !f.phone.value.trim()){ msg.textContent = "Please add your name and phone number."; return; }
+    var data = { source: "old form", name: f.name.value.trim(), phone: f.phone.value.trim(), city: f.city.value.trim(), skills: f.skills.value.trim(), experience: f.experience.value.trim(), cv: f.cv.files[0] ? f.cv.files[0].name : "" };
+    try { localStorage.setItem(SEEKER_KEY, JSON.stringify(data)); } catch(err){}
+    location.hash = "#profile";
+  });
+
+  document.getElementById("post-form").addEventListener("submit", function(e){
+    e.preventDefault();
+    var f = e.target, msg = document.getElementById("post-msg");
+    if(!f.title.value.trim() || !f.company.value.trim()){ msg.textContent = "Please add a job title and company name."; return; }
+    var job = { id: "p"+Date.now(), title: f.title.value.trim(), company: f.company.value.trim(), city: f.city.value.trim() || "Not given", type: f.type.value, support: [], desc: f.desc.value.trim() || "No description." };
+    extraJobs.unshift(job);
+    try { localStorage.setItem("sira_posted_jobs", JSON.stringify(extraJobs)); } catch(err){}
+    f.reset(); msg.textContent = "Job posted. It now appears in Find jobs.";
+  });
+
+  function route(){
+    var h = (location.hash || "#jobs").slice(1), parts = h.split("/"), name = parts[0];
+    if(!document.getElementById("view-"+name)) name = "jobs";
+    document.querySelectorAll(".view").forEach(function(v){ v.classList.toggle("active", v.id === "view-"+name); });
+    document.querySelectorAll("[data-nav]").forEach(function(a){ if(a.dataset.nav === name) a.setAttribute("aria-current","page"); else a.removeAttribute("aria-current"); });
+    if(name === "jobs") renderList("", "");
+    if(name === "job") renderDetail(parts[1]);
+    if(name === "profile") renderProfile();
+    window.scrollTo(0,0);
+  }
+  window.addEventListener("hashchange", route);
+  route();
+</script>
+</body>
+</html>

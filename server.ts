@@ -3,7 +3,11 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
+import crypto from "crypto";
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
+import { speakWithAddis, transcribeWithAddis } from "./server/addisSpeech";
+import { speakWithElevenLabs, transcribeWithElevenLabs } from "./server/elevenLabs";
+import { extractVoiceAnswer } from "./src/lib/voiceExtract";
 
 dotenv.config();
 
@@ -11,12 +15,70 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-4-hydrogen";
 
+// Who transcribes voice answers, per interface language: MEZGEB_SPEECH=addis|elevenlabs|gemini|off.
+//   addis      → Addis AI for Amharic and English
+//   elevenlabs → ElevenLabs for English; Amharic as if unset
+//   gemini     → Gemini for both
+//   unset      → Amharic: Addis AI, else Gemini. English: ElevenLabs, else Addis AI, else Gemini. (Whichever keys are set.)
+// No silent fallback between providers at run time: audio only goes to the one chosen here.
+type SpeechProvider = "addis" | "elevenlabs" | "gemini" | "off";
+type UiLang = "am" | "en";
+function speechProvider(lang: UiLang): SpeechProvider {
+  const chosen = String(process.env.MEZGEB_SPEECH ?? "").trim().toLowerCase();
+  const has = { addis: !!process.env.ADDIS_API_KEY, elevenlabs: !!process.env.ELEVENLABS_API_KEY, gemini: !!process.env.GEMINI_API_KEY };
+  if (chosen === "off") return "off";
+  if (chosen === "addis") return has.addis ? "addis" : "off";
+  if (chosen === "gemini") return has.gemini ? "gemini" : "off";
+  if (chosen === "elevenlabs" && lang === "en") return has.elevenlabs ? "elevenlabs" : "off";
+  const order: SpeechProvider[] = lang === "en" ? ["elevenlabs", "addis", "gemini"] : ["addis", "gemini"];
+  return order.find((p) => has[p as keyof typeof has]) ?? "off";
+}
+
+// Who reads text aloud, per language: Amharic → Addis AI, English → ElevenLabs (when their keys are set).
+// MEZGEB_TTS=off switches it off; the widget then uses the browser's own voice (never English for Amharic text).
+type TtsProvider = "addis" | "elevenlabs" | null;
+function ttsProvider(lang: UiLang): TtsProvider {
+  if (String(process.env.MEZGEB_TTS ?? "").trim().toLowerCase() === "off") return null;
+  if (lang === "am") return process.env.ADDIS_API_KEY ? "addis" : null;
+  return process.env.ELEVENLABS_API_KEY ? "elevenlabs" : null;
+}
+
+const uiLang = (v: unknown): UiLang => (v === "en" ? "en" : "am");
+
 const MAX_AUDIO_BASE64_CHARS = 1_500_000; // ~1.1 MB binary
 const MAX_TEXT_CHARS = 2_500;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 30;
 
 app.use(express.json({ limit: "2mb" }));
+
+// CORS for platforms that embed <mezgeb-register> on their own pages (browser calls to /api and /v1).
+const ALLOWED_ORIGINS = (process.env.MEZGEB_ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+app.use(["/api", "/v1"], (req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && (ALLOWED_ORIGINS.includes(origin) || ALLOWED_ORIGINS.includes("*"))) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  }
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
+
+// Level 1 embed script (build with `npm run build:embed`). Public asset, loadable from any page.
+app.get("/v1/mezgeb.js", (_req, res) => {
+  const file = path.resolve("dist-embed/mezgeb.js");
+  if (!fs.existsSync(file)) {
+    return res.status(404).type("text/plain").send("Embed not built. Run: npm run build:embed");
+  }
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cache-Control", "no-cache");
+  res.type("application/javascript").sendFile(file);
+});
 
 // Simple in-memory per-IP rate limiter for AI routes
 const rateHits = new Map<string, number[]>();
@@ -46,35 +108,187 @@ function getAiClient(): GoogleGenAI | null {
   });
 }
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, aiConfigured: Boolean(process.env.GEMINI_API_KEY) });
+// Level 2: OpenAPI description of the endpoints below
+app.get("/openapi.yaml", (_req, res) => {
+  res.type("application/yaml").sendFile(path.resolve("openapi.yaml"));
 });
 
-app.get("/api/capabilities", (_req, res) => {
-  const hasKey = Boolean(process.env.GEMINI_API_KEY);
+app.get("/api/health", (_req, res) => {
   res.json({
-    voice: hasKey,
+    ok: true,
+    aiConfigured: Boolean(process.env.GEMINI_API_KEY),
+    speech: { am: speechProvider("am"), en: speechProvider("en") },
+    readAloud: { am: ttsProvider("am") ?? "browser", en: ttsProvider("en") ?? "browser" },
+  });
+});
+
+app.get("/api/capabilities", (req, res) => {
+  const hasKey = Boolean(process.env.GEMINI_API_KEY);
+  const speech = { am: speechProvider("am"), en: speechProvider("en") };
+  const asNull = (p: SpeechProvider) => (p === "off" ? null : p);
+  res.json({
+    voice: speech.am !== "off" || speech.en !== "off",
+    // Kept for older widgets: the provider for ?lang= (default Amharic).
+    voiceProvider: asNull(speech[uiLang(req.query.lang)]),
+    voiceProviders: { am: asNull(speech.am), en: asNull(speech.en) },
+    readAloudProviders: { am: ttsProvider("am"), en: ttsProvider("en") },
     smartHelp: hasKey,
     skillsAi: hasKey,
     simplifyAi: hasKey,
   });
 });
 
-// Simulated outbox submission endpoint for offline queue flush
-app.post("/api/registrations/outbox", (req, res) => {
-  const { id, profile } = req.body ?? {};
-  if (!profile || typeof profile !== "object") {
-    return res.status(400).json({ error: "Missing registration profile" });
+// ---------------------------------------------------------------------------
+// Platform handoff (Level 1): the widget stores the confirmed profile here and gets a one-time token.
+// The page gives the token to its own server, which swaps it + its secret key for the profile.
+// Single use, expires after MEZGEB_TOKEN_TTL_MS (default 5 minutes). In-memory: one server process.
+// ---------------------------------------------------------------------------
+const TOKEN_TTL_MS = Number(process.env.MEZGEB_TOKEN_TTL_MS) || 5 * 60_000;
+const DEMO_SITE_KEY = "pk_demo_mezgeb"; // Mezgeb's own /demo page
+const DEMO_SECRET = process.env.MEZGEB_DEMO_SECRET || crypto.randomBytes(24).toString("base64url");
+
+/** MEZGEB_SITE_KEYS="pk_test_savanna:sk_test_…,pk_live_x:sk_live_…" (publishable:secret pairs) */
+const SITE_KEYS = new Map<string, string>([[DEMO_SITE_KEY, DEMO_SECRET]]);
+for (const pair of (process.env.MEZGEB_SITE_KEYS ?? "").split(",")) {
+  const [pk, sk] = pair.split(":").map((s) => s?.trim());
+  if (pk && sk) SITE_KEYS.set(pk, sk);
+}
+
+type Registration = { siteKey: string; profile: Record<string, unknown>; createdAt: number; expiresAt: number };
+const registrations = new Map<string, Registration>();
+
+function sweepRegistrations() {
+  // Keep expired entries 10 more minutes so a late exchange gets "expired" (410), not "unknown" (404).
+  const cutoff = Date.now() - 10 * 60_000;
+  for (const [token, reg] of registrations) if (reg.expiresAt < cutoff) registrations.delete(token);
+}
+
+function secretsMatch(given: string, expected: string): boolean {
+  const a = crypto.createHash("sha256").update(given).digest();
+  const b = crypto.createHash("sha256").update(expected).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+function createRegistration(siteKey: unknown, profile: unknown): { token: string; expiresAt: number } | { error: string; status: number } {
+  if (typeof siteKey !== "string" || !SITE_KEYS.has(siteKey)) return { error: "Unknown site key", status: 400 };
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return { error: "Missing registration profile", status: 400 };
+  sweepRegistrations();
+  const token = `mzg_tok_${crypto.randomBytes(24).toString("base64url")}`;
+  const now = Date.now();
+  registrations.set(token, { siteKey, profile: profile as Record<string, unknown>, createdAt: now, expiresAt: now + TOKEN_TTL_MS });
+  return { token, expiresAt: now + TOKEN_TTL_MS };
+}
+
+type ExchangeResult = { status: number; body: Record<string, unknown> };
+function exchangeToken(token: unknown, secret: string): ExchangeResult {
+  if (!secret) return { status: 401, body: { error: "Missing secret key (Authorization: Bearer sk_…)" } };
+  if (typeof token !== "string" || !token) return { status: 400, body: { error: "Missing token" } };
+  sweepRegistrations();
+  const reg = registrations.get(token);
+  if (!reg) return { status: 404, body: { error: "Unknown or already used token" } };
+  if (!secretsMatch(secret, SITE_KEYS.get(reg.siteKey) ?? "")) return { status: 401, body: { error: "Wrong secret key" } };
+  registrations.delete(token); // single use, also when expired
+  if (Date.now() > reg.expiresAt) return { status: 410, body: { error: "Token expired" } };
+  return { status: 200, body: { profile: reg.profile, siteKey: reg.siteKey, createdAt: new Date(reg.createdAt).toISOString() } };
+}
+
+// Widget → Mezgeb: store the confirmed profile, get a one-time token (never the profile back).
+app.post("/v1/registrations", aiRateLimit, (req, res) => {
+  const out = createRegistration(req.body?.siteKey, req.body?.profile);
+  if ("error" in out) return res.status(out.status).json({ error: out.error });
+  res.status(201).json(out);
+});
+
+// Offline outbox flush: same as above, keeps the outbox id.
+app.post("/api/registrations/outbox", aiRateLimit, (req, res) => {
+  const { id, profile, siteKey } = req.body ?? {};
+  const out = createRegistration(siteKey ?? DEMO_SITE_KEY, profile);
+  if ("error" in out) return res.status(out.status).json({ error: out.error });
+  res.json({ ok: true, outboxId: id ?? null, ...out });
+});
+
+// Platform server → Mezgeb: swap token + secret key for the confirmed profile. Server-to-server only.
+app.post("/v1/registrations/exchange", (req, res) => {
+  const auth = String(req.headers.authorization ?? "");
+  const secret = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  const out = exchangeToken(req.body?.token, secret);
+  res.status(out.status).json(out.body);
+});
+
+// Mezgeb's own /demo page: shows a real exchange using a server-side demo key (never sent to the browser).
+app.post("/api/demo/exchange", (req, res) => {
+  const reg = registrations.get(String(req.body?.token ?? ""));
+  if (reg && reg.siteKey !== DEMO_SITE_KEY) return res.status(403).json({ error: "Not a demo token" });
+  const out = exchangeToken(req.body?.token, DEMO_SECRET);
+  res.status(out.status).json(out.body);
+});
+
+// Static sample host sites: swap token using publishable site key (secret stays on this server).
+app.post("/api/sample/registrations/exchange", (req, res) => {
+  const siteKey = String(req.body?.siteKey ?? "");
+  if (!siteKey.startsWith("pk_sample_")) return res.status(403).json({ error: "Not a sample site key" });
+  const secret = SITE_KEYS.get(siteKey);
+  if (!secret) return res.status(400).json({ error: "Unknown site key" });
+  const out = exchangeToken(req.body?.token, secret);
+  res.status(out.status).json(out.body);
+});
+
+// Read aloud: template text (question, hint, error, help) → MP3. Amharic via Addis AI, English via ElevenLabs.
+// The same question is read to every learner, so each clip is generated once and kept in memory
+// (keeps paid/free credit use to one generation per sentence per server run).
+const TTS_MAX_CHARS = 600;
+const TTS_CACHE_MAX_BYTES = 40 * 1024 * 1024;
+const ttsCache = new Map<string, { audio: Buffer; contentType: string }>();
+let ttsCacheBytes = 0;
+function ttsCachePut(key: string, value: { audio: Buffer; contentType: string }) {
+  ttsCache.set(key, value);
+  ttsCacheBytes += value.audio.length;
+  for (const [k, v] of ttsCache) {
+    if (ttsCacheBytes <= TTS_CACHE_MAX_BYTES) break;
+    ttsCache.delete(k); // oldest first
+    ttsCacheBytes -= v.audio.length;
   }
-  const token = `mzg_tok_${Math.random().toString(16).slice(2, 10)}`;
-  res.json({ ok: true, outboxId: id ?? null, token, profile });
+}
+
+app.post("/api/tts", aiRateLimit, async (req, res) => {
+  const lang = uiLang(req.body?.lang);
+  const provider = ttsProvider(lang);
+  if (!provider) return res.status(503).json({ error: "Read-aloud service not configured" });
+  const text = String(req.body?.text ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return res.status(400).json({ error: "Missing text" });
+  if (text.length > TTS_MAX_CHARS) return res.status(413).json({ error: `Text too long (max ${TTS_MAX_CHARS} characters).` });
+
+  const voice = provider === "addis" ? process.env.ADDIS_TTS_VOICE ?? "" : process.env.ELEVENLABS_VOICE_ID ?? "";
+  const key = crypto.createHash("sha256").update(`${provider}|${voice}|${lang}|${text}`).digest("hex");
+  let clip = ttsCache.get(key);
+  if (clip) {
+    ttsCache.delete(key); // refresh its place (least recently used goes first)
+    ttsCache.set(key, clip);
+  } else {
+    const out =
+      provider === "addis"
+        ? await speakWithAddis(text, lang, { apiKey: String(process.env.ADDIS_API_KEY), baseUrl: process.env.ADDIS_API_BASE, voiceId: voice })
+        : await speakWithElevenLabs(text, {
+            apiKey: String(process.env.ELEVENLABS_API_KEY),
+            baseUrl: process.env.ELEVENLABS_API_BASE,
+            voiceId: voice,
+            ttsModel: process.env.ELEVENLABS_TTS_MODEL,
+          });
+    if (!out.ok) return res.status(out.status).json({ error: out.error });
+    clip = { audio: out.audio, contentType: out.contentType };
+    ttsCachePut(key, clip);
+  }
+  res.setHeader("Content-Type", clip.contentType);
+  res.setHeader("Cache-Control", "private, max-age=86400");
+  res.setHeader("X-Mezgeb-Voice", provider);
+  res.send(clip.audio);
 });
 
 // a) Voice answers transcription + field extraction + optional choice matching
 app.post("/api/ai/voice", aiRateLimit, async (req, res) => {
-  const ai = getAiClient();
-  if (!ai) {
-    return res.status(503).json({ error: "AI service not configured" });
+  const provider = speechProvider(uiLang(req.body?.lang));
+  if (provider === "off") {
+    return res.status(503).json({ error: "Speech service not configured" });
   }
 
   try {
@@ -96,6 +310,31 @@ app.post("/api/ai/voice", aiRateLimit, async (req, res) => {
           label: String(o?.label ?? ""),
         }))
       : [];
+
+    if (provider === "addis" || provider === "elevenlabs") {
+      // These return the words only; the answer is pulled out by rules (src/lib/voiceExtract.ts).
+      const clip = { audio: Buffer.from(audioBase64, "base64"), mimeType: safeMime, lang: uiLang(lang) };
+      const heard =
+        provider === "addis"
+          ? await transcribeWithAddis(clip, {
+              apiKey: String(process.env.ADDIS_API_KEY),
+              baseUrl: process.env.ADDIS_API_BASE,
+              backend: process.env.ADDIS_STT_BACKEND,
+            })
+          : await transcribeWithElevenLabs(clip, {
+              apiKey: String(process.env.ELEVENLABS_API_KEY),
+              baseUrl: process.env.ELEVENLABS_API_BASE,
+              sttModel: process.env.ELEVENLABS_STT_MODEL,
+            });
+      if (!heard.ok) return res.status(heard.status).json({ error: heard.error });
+      const answer = extractVoiceAnswer({ transcript: heard.text, expectedType: String(expectedType ?? "text"), options: optionList });
+      return res.json({ transcript: heard.text, ...answer });
+    }
+
+    const ai = getAiClient();
+    if (!ai) {
+      return res.status(503).json({ error: "AI service not configured" });
+    }
 
     const optionsInstruction =
       optionList.length > 0
@@ -651,7 +890,14 @@ ${serialized}`;
 });
 
 async function startServer() {
-  const isProd = process.env.NODE_ENV === "production" && fs.existsSync(path.resolve("dist/index.html"));
+  // `--production` works on every OS (NODE_ENV=… prefixes don't work in Windows cmd/PowerShell)
+  const wantsProd = process.env.NODE_ENV === "production" || process.argv.includes("--production");
+  const isProd = wantsProd && fs.existsSync(path.resolve("dist/index.html"));
+
+  const sampleSitesDir = path.resolve("sample-sites");
+  if (fs.existsSync(sampleSitesDir)) {
+    app.use("/sample-sites", express.static(sampleSitesDir));
+  }
 
   if (!isProd) {
     const vite = await createViteServer({
@@ -661,8 +907,12 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distDir = path.resolve("dist");
+    if (fs.existsSync(sampleSitesDir)) {
+      app.use("/sample-sites", express.static(sampleSitesDir));
+    }
     app.use(express.static(distDir));
-    app.get("/{*path}", (_req, res) => {
+    // Express 4 wildcard ("/{*path}" is Express 5 syntax and matched nothing, so deep links 404'd)
+    app.get("*", (_req, res) => {
       res.sendFile(path.join(distDir, "index.html"));
     });
   }

@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kelem Learn (sample site)</title>
+<style>
+  :root{
+    --bg:#FFFFFF; --ink:#14213D; --muted:#5A6275; --line:#DDE2EA;
+    --brand:#1D5FD1; --brand-ink:#FFFFFF; --soft:#EEF3FC; --warm:#FFF7E8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Ethiopic",sans-serif;color:var(--ink);background:var(--bg);line-height:1.6}
+  a{color:var(--brand)}
+  a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #F2A900;outline-offset:2px}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 20px}
+  .skip{position:absolute;left:-9999px}.skip:focus{left:12px;top:12px;background:#fff;padding:8px 12px;z-index:10}
+  header{border-bottom:1px solid var(--line)}
+  .bar{display:flex;align-items:center;gap:24px;min-height:64px;flex-wrap:wrap}
+  .logo{font-weight:700;font-size:20px;text-decoration:none;color:var(--ink)}
+  .logo span{color:var(--brand)}
+  nav ul{list-style:none;display:flex;gap:20px;margin:0;padding:0;flex-wrap:wrap}
+  nav a{text-decoration:none;color:var(--ink)}
+  nav a[aria-current="page"]{font-weight:600;text-decoration:underline;text-underline-offset:6px}
+  .bar .right{margin-left:auto;display:flex;gap:10px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 18px;border-radius:8px;border:1px solid var(--brand);background:var(--brand);color:var(--brand-ink);font:600 15px inherit;text-decoration:none;cursor:pointer}
+  .btn.ghost{background:#fff;color:var(--brand)}
+  .hero{background:var(--soft);padding:72px 0}
+  .hero h1{font-size:clamp(32px,5vw,48px);line-height:1.15;margin:0 0 16px;max-width:640px}
+  .hero p{font-size:18px;color:var(--muted);max-width:560px;margin:0 0 24px}
+  section{padding:64px 0}
+  h2{font-size:28px;margin:0 0 24px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:20px}
+  .course{border:1px solid var(--line);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:8px}
+  .course h3{margin:0;font-size:18px}
+  .tag{font-size:13px;color:var(--muted)}
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;counter-reset:s}
+  .steps li{list-style:none;border-top:3px solid var(--brand);padding-top:12px}
+  .steps{padding:0}
+  footer{border-top:1px solid var(--line);padding:32px 0;color:var(--muted);font-size:14px}
+  .sample-note{background:var(--warm);border-bottom:1px solid #F0DDB5;font-size:14px;padding:8px 0;text-align:center}
+  /* Sign-up page */
+  .view{display:none}.view.active{display:block}
+  .signup{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:40px;align-items:start}
+  .slot{border:2px dashed #9AA8C2;border-radius:12px;min-height:420px;padding:24px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:8px;color:var(--muted);background:#FAFBFD}
+  .slot code{background:#EEF1F6;padding:2px 6px;border-radius:4px;font-size:13px}
+  .old-form{display:flex;flex-direction:column;gap:14px}
+  label{font-weight:600;font-size:15px}
+  input,select{width:100%;min-height:44px;border:1px solid #AEB7C7;border-radius:6px;padding:0 12px;font:16px inherit}
+  .field{display:flex;flex-direction:column;gap:6px}
+  .hint{font-size:14px;color:var(--muted);font-weight:400}
+  .panel{border:1px solid var(--line);border-radius:12px;padding:24px}
+  dl{display:grid;grid-template-columns:160px 1fr;gap:8px 16px;margin:0}
+  dt{color:var(--muted)}dd{margin:0}
+  @media (max-width:640px){dl{grid-template-columns:1fr}.bar .right{margin-left:0}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+<div class="sample-note">Sample website for testing Mezgeb. Kelem Learn is not a real organisation.</div>
+
+<header>
+  <div class="wrap bar">
+    <a class="logo" href="#home">Kelem<span>Learn</span></a>
+    <nav aria-label="Main">
+      <ul>
+        <li><a href="#home" data-nav="home">Home</a></li>
+        <li><a href="#courses" data-nav="courses">Courses</a></li>
+        <li><a href="#account" data-nav="account">My account</a></li>
+      </ul>
+    </nav>
+    <div class="right">
+      <a class="btn ghost" href="#account">Log in</a>
+      <a class="btn" href="onboarding.html">Sign up</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- HOME -->
+  <div class="view" id="view-home">
+    <div class="hero">
+      <div class="wrap">
+        <h1>Free short courses to start your career</h1>
+        <p>Learn digital skills at your own pace, in Amharic or English. Each course takes two to six weeks.</p>
+        <a class="btn" href="onboarding.html">Create a free account</a>
+      </div>
+    </div>
+    <section>
+      <div class="wrap">
+        <h2>Popular courses</h2>
+        <div class="grid" id="home-courses"></div>
+      </div>
+    </section>
+    <section style="background:#FAFBFD">
+      <div class="wrap">
+        <h2>How it works</h2>
+        <ol class="steps">
+          <li><strong>Create an account.</strong><br>Tell us a little about yourself.</li>
+          <li><strong>Choose a course.</strong><br>Pick one that fits your goals.</li>
+          <li><strong>Learn and get a certificate.</strong><br>Finish the lessons at your own pace.</li>
+        </ol>
+      </div>
+    </section>
+  </div>
+
+  <!-- COURSES -->
+  <div class="view" id="view-courses">
+    <section>
+      <div class="wrap">
+        <h1 style="font-size:36px;margin:0 0 24px">All courses</h1>
+        <div class="grid" id="all-courses"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- SIGN UP -->
+  <div class="view" id="view-signup">
+    <section>
+      <div class="wrap">
+        <h1 style="font-size:36px;margin:0 0 8px">Create your account</h1>
+        <p style="color:var(--muted);margin:0 0 32px">It is free. You can start learning today.</p>
+        <div class="signup">
+
+          <!-- Current sign-up form (the "before" version, for comparison) -->
+          <div class="panel">
+            <h2 style="font-size:20px">Current sign-up form</h2>
+            <p class="hint" style="margin-top:-12px">This is the site's existing form, kept for comparison.</p>
+            <form class="old-form" id="old-form" novalidate>
+              <div class="field"><label for="f-name">Full name</label><input id="f-name" name="name" autocomplete="name" required></div>
+              <div class="field"><label for="f-phone">Phone number</label><input id="f-phone" name="phone" type="tel" autocomplete="tel" required></div>
+              <div class="field"><label for="f-email">Email <span class="hint">(optional)</span></label><input id="f-email" name="email" type="email" autocomplete="email"></div>
+              <div class="field"><label for="f-dob">Date of birth</label><input id="f-dob" name="dob" type="date"></div>
+              <div class="field"><label for="f-edu">Highest education</label>
+                <select id="f-edu" name="education"><option value="">Choose one</option><option>Primary school</option><option>Secondary school</option><option>TVET / college</option><option>University</option></select></div>
+              <div class="field"><label for="f-pass">Password</label><input id="f-pass" name="password" type="password" autocomplete="new-password" required></div>
+              <p id="form-msg" role="status" class="hint"></p>
+              <button class="btn" type="submit">Create account</button>
+            </form>
+          </div>
+
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ACCOUNT -->
+  <div class="view" id="view-account">
+    <section>
+      <div class="wrap">
+        <h1 style="font-size:36px;margin:0 0 24px">My account</h1>
+        <div class="panel" id="account-panel"></div>
+      </div>
+    </section>
+  </div>
+
+</main>
+
+<footer>
+  <div class="wrap">Kelem Learn · Sample site for testing. All courses and data are made up. · <a href="#signup">Old sign-up form (for comparison)</a></div>
+</footer>
+
+<script>
+  var COURSES = [
+    { title: "Computer basics", weeks: 2, lang: "Amharic, English", level: "Beginner" },
+    { title: "Using a smartphone for work", weeks: 2, lang: "Amharic", level: "Beginner" },
+    { title: "Introduction to spreadsheets", weeks: 4, lang: "Amharic, English", level: "Beginner" },
+    { title: "Customer service skills", weeks: 3, lang: "English", level: "Beginner" },
+    { title: "Web design basics", weeks: 6, lang: "English", level: "Intermediate" },
+    { title: "Starting a small business", weeks: 4, lang: "Amharic", level: "Beginner" }
+  ];
+  function courseCard(c){
+    return '<article class="course"><h3>'+c.title+'</h3><span class="tag">'+c.weeks+' weeks · '+c.level+'</span><span class="tag">'+c.lang+'</span><a href="onboarding.html">Enrol</a></article>';
+  }
+  document.getElementById("home-courses").innerHTML = COURSES.slice(0,3).map(courseCard).join("");
+  document.getElementById("all-courses").innerHTML = COURSES.map(courseCard).join("");
+
+  var STORE_KEY = "kelem_learn_user";
+  function readUser(){ try { return JSON.parse(localStorage.getItem(STORE_KEY)); } catch(e){ return null; } }
+  function renderAccount(){
+    var u = readUser(), el = document.getElementById("account-panel");
+    if(!u){ el.innerHTML = '<p>You are not signed in.</p><a class="btn" href="onboarding.html">Sign up</a>'; return; }
+    el.innerHTML = '<dl>'+Object.keys(u).map(function(k){ return '<dt>'+k+'</dt><dd>'+String(u[k]||"—")+'</dd>'; }).join("")+'</dl>'+
+      '<p class="hint" style="margin-top:16px">This page shows the profile the site received. Later it will show the profile from Mezgeb.</p>'+
+      '<button class="btn ghost" type="button" id="signout">Sign out</button>';
+    document.getElementById("signout").onclick = function(){ try{localStorage.removeItem(STORE_KEY);}catch(e){} renderAccount(); };
+  }
+
+  document.getElementById("old-form").addEventListener("submit", function(e){
+    e.preventDefault();
+    var f = e.target, msg = document.getElementById("form-msg");
+    if(!f.name.value.trim() || !f.phone.value.trim() || !f.password.value){ msg.textContent = "Please fill in name, phone and password."; return; }
+    var data = { source: "old form", name: f.name.value.trim(), phone: f.phone.value.trim(), email: f.email.value.trim(), date_of_birth: f.dob.value, education: f.education.value };
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); } catch(err){}
+    location.hash = "#account";
+  });
+
+  function route(){
+    var name = (location.hash || "#home").slice(1);
+    if(!document.getElementById("view-"+name)) name = "home";
+    document.querySelectorAll(".view").forEach(function(v){ v.classList.toggle("active", v.id === "view-"+name); });
+    document.querySelectorAll("[data-nav]").forEach(function(a){ if(a.dataset.nav === name) a.setAttribute("aria-current","page"); else a.removeAttribute("aria-current"); });
+    if(name === "account") renderAccount();
+    window.scrollTo(0,0);
+  }
+  window.addEventListener("hashchange", route);
+  route();
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+node_modules
+dist
+dist-embed
+.env
+.env.*
+!.env.example
+.git
+test-results

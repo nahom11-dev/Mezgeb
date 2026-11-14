@@ -1,322 +1,500 @@
-import React, { useMemo, useState } from "react";
-import { AccessibleDialog } from "../components/AccessibleDialog";
-import { CheckIcon, CopyIcon, LockIcon, MicIcon } from "../components/Icons";
+import React, { useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { Check, ChevronDown, Lock } from "lucide-react";
 import { Layout } from "../components/Layout";
-import { useLiveAnnouncer } from "../components/LiveAnnouncer";
-import { MezgebWidget } from "../components/MezgebWidget";
+import { AnswerMode, MezgebAnswers, MezgebWidget } from "../components/MezgebWidget";
 import { SAMPLE_JOBS, SampleJob } from "../data/jobs";
-import { useI18n } from "../i18n";
+import { TranslationKeys, useI18n } from "../i18n";
 import { loadCompletedLearnerProfile } from "../lib/profileStore";
+import { JOB_APPLICATION_TEMPLATE, SUPPORT_OPTIONS } from "../templates";
 import {
-  EMPLOYER_ACCOM_OPTIONS,
-  EMPLOYER_TEMPLATE,
-  JOB_APPLICATION_TEMPLATE,
-  SUPPORT_OPTIONS,
-} from "../templates";
+  Badge,
+  Banner,
+  Button,
+  ChoiceList,
+  Dialog,
+  EmptyState,
+  Field,
+  VoiceButton,
+  VoiceState,
+} from "../ui";
+
+function getPlainAccomKey(code: string): TranslationKeys | null {
+  switch (code) {
+    case "screen_reader":
+      return "jobsAccomScreenReader";
+    case "extra_time":
+      return "jobsAccomExtraTime";
+    case "step_free":
+      return "jobsAccomStepFree";
+    case "sign_language":
+      return "jobsAccomSignLanguage";
+    case "large_print":
+      return "jobsAccomLargePrint";
+    case "quiet_room":
+      return "jobsAccomQuietRoom";
+    case "flexible_hours":
+      return "jobsAccomFlexibleHours";
+    case "remote_option":
+      return "jobsAccomRemote";
+    default:
+      return null;
+  }
+}
 
 export function JobsPage() {
   const { lang, t } = useI18n();
-  const { announce } = useLiveAnnouncer();
+  const savedProfile = useMemo(() => loadCompletedLearnerProfile(), []);
 
-  const [activeTab, setActiveTab] = useState<"seeker" | "employer">("seeker");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [locationFilter, setLocationFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | "remote" | "onsite">("all");
+  const [selectedSupport, setSelectedSupport] = useState<string[]>(
+    () => savedProfile?.supportNeedsInSession ?? []
+  );
 
-  // Pre-populate private filters from session-stored support needs if present
-  const [selectedFilters, setSelectedFilters] = useState<string[]>(() => {
-    const saved = loadCompletedLearnerProfile();
-    return saved?.supportNeedsInSession ?? [];
-  });
+  // Voice search state
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const recRef = useRef<any>(null);
 
-  // Apply by voice modal
+  // Selected job & apply modal
+  const [selectedJobId, setSelectedJobId] = useState<string>(SAMPLE_JOBS[0].id);
   const [applyingJob, setApplyingJob] = useState<SampleJob | null>(null);
+  const [applyMode, setApplyMode] = useState<AnswerMode>("speak");
   const [applicationResult, setApplicationResult] = useState<Record<string, unknown> | null>(null);
 
-  // Employer JobPosting JSON-LD output
-  const [jobPostingJsonLd, setJobPostingJsonLd] = useState<Record<string, unknown> | null>(null);
-  const [copiedJsonLd, setCopiedJsonLd] = useState(false);
-
-  const toggleFilter = (val: string) => {
-    setSelectedFilters((prev) =>
-      prev.includes(val) ? prev.filter((item) => item !== val) : [...prev, val]
-    );
+  const getAccomPlainLabel = (code: string) => {
+    const key = getPlainAccomKey(code);
+    if (key) return t(key);
+    const opt = SUPPORT_OPTIONS.find((o) => o.value === code);
+    return opt ? opt.label[lang] : code;
   };
 
-  const getAccomLabel = (val: string): string => {
-    const opt = EMPLOYER_ACCOM_OPTIONS.find((o) => o.value === val);
-    return opt ? opt.label[lang] : val;
-  };
-
-  const rankedJobs = useMemo(() => {
-    return SAMPLE_JOBS.map((job) => {
-      const metCount = selectedFilters.filter((f) => job.offeredAccommodations.includes(f)).length;
-      return { job, metCount };
-    }).sort((a, b) => b.metCount - a.metCount);
-  }, [selectedFilters]);
-
-  const handleEmployerComplete = (result: {
-    token: string;
-    profile: Record<string, unknown>;
-    supportShared: boolean;
-  }) => {
-    const p = result.profile;
-    const title = String(p.job_title ?? "Job position");
-    const company = String(p.company_name ?? "Employer");
-    const location = String(p.job_location ?? "Addis Ababa");
-    const contact = p.contact_person ? String(p.contact_person) : undefined;
-    const accommodations = Array.isArray(p.offered_accommodations)
-      ? (p.offered_accommodations as string[])
-      : [];
-
-    const isRemote = location.toLowerCase().includes("remote") || location.includes("ርቀት");
-
-    const jsonLd: Record<string, unknown> = {
-      "@context": "https://schema.org/",
-      "@type": "JobPosting",
-      title,
-      hiringOrganization: {
-        "@type": "Organization",
-        name: company,
-      },
-      ...(isRemote
-        ? { jobLocationType: "TELECOMMUTE" }
-        : {
-            jobLocation: {
-              "@type": "Place",
-              address: {
-                "@type": "PostalAddress",
-                addressLocality: location,
-                addressCountry: "ET",
-              },
-            },
-          }),
-      ...(contact ? { applicationContact: { "@type": "ContactPoint", name: contact } } : {}),
-      jobBenefits: accommodations,
-      mezgebAccommodations: accommodations,
-    };
-
-    setJobPostingJsonLd(jsonLd);
-  };
-
-  const handleCopyJsonLd = async () => {
-    if (!jobPostingJsonLd) return;
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(jobPostingJsonLd, null, 2));
-    } catch {
-      // ignore clipboard fallback
+  const handleStartVoiceSearch = () => {
+    const SpeechRec =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRec) {
+      try {
+        const rec = new SpeechRec();
+        rec.lang = lang === "am" ? "am-ET" : "en-US";
+        rec.interimResults = false;
+        rec.maxAlternatives = 1;
+        rec.onresult = (ev: any) => {
+          const text = ev?.results?.[0]?.[0]?.transcript ?? "";
+          if (text) {
+            setVoiceTranscript(text);
+            setVoiceState("review");
+          } else {
+            setVoiceState("failed");
+          }
+        };
+        rec.onerror = () => {
+          setVoiceState("failed");
+        };
+        recRef.current = rec;
+        rec.start();
+        setVoiceState("listening");
+        return;
+      } catch {
+        setVoiceState("failed");
+        return;
+      }
     }
-    setCopiedJsonLd(true);
-    announce(t("copiedAnnouncement"));
-    window.setTimeout(() => setCopiedJsonLd(false), 2000);
+    setVoiceState("listening");
   };
+
+  const handleStopVoiceSearch = () => {
+    if (recRef.current) {
+      try {
+        recRef.current.stop();
+      } catch {
+        // ignore
+      }
+      setVoiceState("processing");
+      return;
+    }
+    setVoiceState("processing");
+    window.setTimeout(() => {
+      setVoiceTranscript(lang === "am" ? "ዳታ" : "data");
+      setVoiceState("review");
+    }, 350);
+  };
+
+  const filteredJobs = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return SAMPLE_JOBS.filter((job) => {
+      if (typeFilter === "remote" && !job.remote) return false;
+      if (typeFilter === "onsite" && job.remote) return false;
+      if (locationFilter === "addis" && !job.city.en.toLowerCase().includes("addis")) return false;
+      if (locationFilter === "adama" && !job.city.en.toLowerCase().includes("adama")) return false;
+      if (locationFilter === "remote" && !job.remote) return false;
+
+      if (q) {
+        const hay = `${job.title.en} ${job.title.am} ${job.employerType.en} ${job.employerType.am} ${job.city.en} ${job.city.am} ${job.summary.en} ${job.summary.am}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    })
+      .map((job) => {
+        const metCount = selectedSupport.filter((f) =>
+          job.offeredAccommodations.includes(f)
+        ).length;
+        return { job, metCount };
+      })
+      .sort((a, b) => b.metCount - a.metCount);
+  }, [searchQuery, typeFilter, locationFilter, selectedSupport]);
+
+  const activeJob =
+    filteredJobs.find((item) => item.job.id === selectedJobId)?.job ??
+    filteredJobs[0]?.job ??
+    null;
 
   return (
     <Layout>
-      <section aria-labelledby="jobs-heading" className="py-12 md:py-16 bg-[#FAF9F6] min-h-[75vh]">
-        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 md:px-10 space-y-8">
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-            <div className="space-y-2 max-w-2xl">
-              <span className="text-xs font-medium text-[#6B6B6B]">{t("demoSampleBadge")}</span>
-              <h1 id="jobs-heading" className="text-3xl md:text-4xl font-bold tracking-tight text-[#111111]">
+      <section aria-labelledby="jobs-heading" className="py-12 md:py-16 bg-[var(--paper)] min-h-[75vh]">
+        <div className="mezgeb-container space-y-8 text-left">
+          {/* Header */}
+          <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-6 border-b border-[var(--line)]">
+            <div className="space-y-2 max-w-[64ch]">
+              <Badge variant="neutral">{t("templatesSampleBadge")}</Badge>
+              <h1
+                id="jobs-heading"
+                className="mezgeb-display-heading text-[1.75rem] md:text-[2.25rem] font-semibold text-[var(--ink)]"
+              >
                 {t("jobsTitle")}
               </h1>
-              <p className="text-base text-[#6B6B6B]">{t("jobsSubtitle")}</p>
+              <p className="text-base text-[var(--muted)] leading-relaxed">{t("jobsSubtitle")}</p>
             </div>
 
-            <div
-              role="tablist"
-              aria-label={t("jobsTitle")}
-              className="inline-flex rounded-xl border border-[#E7E7E4] bg-white p-1 shrink-0"
+            <Link
+              to="/employers/accommodations"
+              className="inline-flex items-center justify-center min-h-[44px] px-4 rounded-[10px] border border-[var(--ink)] bg-[var(--paper)] text-[var(--ink)] text-sm font-medium hover:bg-[var(--stone)] mezgeb-transition shrink-0"
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === "seeker"}
-                onClick={() => setActiveTab("seeker")}
-                className={`px-4 min-h-[40px] rounded-lg text-sm font-semibold transition-colors ${
-                  activeTab === "seeker" ? "bg-[#111111] text-white" : "text-[#6B6B6B] hover:text-[#111111]"
-                }`}
-              >
-                {t("jobsTabSeeker")}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === "employer"}
-                onClick={() => setActiveTab("employer")}
-                className={`px-4 min-h-[40px] rounded-lg text-sm font-semibold transition-colors ${
-                  activeTab === "employer" ? "bg-[#111111] text-white" : "text-[#6B6B6B] hover:text-[#111111]"
-                }`}
-              >
-                {t("jobsTabEmployer")}
-              </button>
-            </div>
-          </div>
+              {t("employerAccomTitle")}
+            </Link>
+          </header>
 
-          {activeTab === "seeker" ? (
-            <div className="space-y-8">
-              {/* Private filter panel */}
-              <div className="mezgeb-card p-6 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-base font-semibold text-[#111111]">{t("jobsPrivateFilterTitle")}</h2>
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#6B6B6B]">
-                    <LockIcon size={14} />
-                    <span>{t("jobsPrivateFilterNote")}</span>
-                  </span>
+          {/* Search with VoiceButton + Collapsible Filters */}
+          <div className="space-y-4">
+            <Field
+              id="jobs-search-input"
+              label={t("feat4SearchPlaceholder")}
+              labelLang={lang}
+              inputProps={{
+                type: "search",
+                value: searchQuery,
+                onChange: (e) => setSearchQuery(e.target.value),
+              }}
+              rightSlot={
+                <VoiceButton
+                  state={voiceState}
+                  transcript={voiceTranscript}
+                  onTranscriptChange={setVoiceTranscript}
+                  onStart={handleStartVoiceSearch}
+                  onStop={handleStopVoiceSearch}
+                  onKeep={() => {
+                    setSearchQuery(voiceTranscript);
+                    setVoiceState("idle");
+                  }}
+                  onRetry={() => {
+                    setVoiceTranscript("");
+                    setVoiceState("idle");
+                  }}
+                  labels={{
+                    speakLabel: t("widgetSpeakAnswerLabel"),
+                    listeningLabel: t("widgetVoiceListeningLabel"),
+                    processingLabel: t("widgetVoiceProcessingLabel"),
+                    keepLabel: t("widgetVoiceKeepBtn"),
+                    tryAgainLabel: t("widgetVoiceTryAgainBtn"),
+                    failedMessage: t("widgetVoiceFailedMsg"),
+                    transcriptLabel: t("widgetTranscriptConfirmTitle"),
+                  }}
+                />
+              }
+            />
+
+            <details className="rounded-[10px] border border-[var(--line)] bg-[var(--paper)] group">
+              <summary className="px-4 py-3 flex items-center justify-between gap-3 cursor-pointer list-none min-h-[48px] font-medium text-base text-[var(--ink)]">
+                <span>
+                  {t("jobsPrivateFilterTitle")}
+                  {selectedSupport.length > 0 ? ` (${selectedSupport.length})` : ""}
+                </span>
+                <ChevronDown
+                  size={20}
+                  strokeWidth={1.75}
+                  className="text-[var(--muted)] group-open:rotate-180"
+                  aria-hidden="true"
+                />
+              </summary>
+
+              <div className="p-4 sm:p-5 border-t border-[var(--line)] space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label
+                      htmlFor="jobs-filter-location"
+                      className="block text-sm font-medium text-[var(--ink)] mb-1.5"
+                    >
+                      {t("qJobLocationLabel")}
+                    </label>
+                    <select
+                      id="jobs-filter-location"
+                      value={locationFilter}
+                      onChange={(e) => setLocationFilter(e.target.value)}
+                      className="w-full min-h-[44px] px-3 rounded-[6px] border border-[var(--line-strong)] bg-[var(--paper)] text-sm text-[var(--ink)]"
+                    >
+                      <option value="all">{t("templatesFilterAll")}</option>
+                      <option value="addis">Addis Ababa</option>
+                      <option value="adama">Adama</option>
+                      <option value="remote">{t("jobsRemoteLabel")}</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="jobs-filter-type"
+                      className="block text-sm font-medium text-[var(--ink)] mb-1.5"
+                    >
+                      {t("qStartWhenLabel")}
+                    </label>
+                    <select
+                      id="jobs-filter-type"
+                      value={typeFilter}
+                      onChange={(e) =>
+                        setTypeFilter(e.target.value as "all" | "remote" | "onsite")
+                      }
+                      className="w-full min-h-[44px] px-3 rounded-[6px] border border-[var(--line-strong)] bg-[var(--paper)] text-sm text-[var(--ink)]"
+                    >
+                      <option value="all">{t("templatesFilterAll")}</option>
+                      <option value="remote">{t("jobsRemoteLabel")}</option>
+                      <option value="onsite">Addis Ababa / Adama</option>
+                    </select>
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  {SUPPORT_OPTIONS.map((opt) => {
-                    const active = selectedFilters.includes(opt.value);
-                    return (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        aria-pressed={active}
-                        onClick={() => toggleFilter(opt.value)}
-                        className={`px-3.5 min-h-[40px] rounded-xl border text-sm font-medium inline-flex items-center gap-2 transition-colors ${
-                          active
-                            ? "border-[#8F6FE0] bg-[#EEEBF8] text-[#111111] font-semibold"
-                            : "border-[#E7E7E4] bg-white text-[#6B6B6B] hover:border-[#C8C8C4]"
-                        }`}
-                      >
-                        {active && <CheckIcon size={14} className="text-[#6A4FC4]" />}
-                        <span>{opt.label[lang]}</span>
-                      </button>
-                    );
-                  })}
+                <div className="space-y-3 pt-2 border-t border-[var(--line)]">
+                  <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-[var(--ink)]">
+                    <Lock size={16} strokeWidth={1.75} aria-hidden="true" />
+                    <span>{t("jobsPrivateFilterHint")}</span>
+                  </div>
+
+                  <ChoiceList
+                    name="jobs-private-support"
+                    legend={t("jobsPrivateFilterTitle")}
+                    mode="multi"
+                    value={selectedSupport}
+                    onChange={(next) => setSelectedSupport(Array.isArray(next) ? next : [next])}
+                    options={SUPPORT_OPTIONS.map((opt) => ({
+                      value: opt.value,
+                      title: getAccomPlainLabel(opt.value),
+                      lang,
+                    }))}
+                  />
                 </div>
               </div>
+            </details>
+          </div>
 
-              {/* Job cards grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {rankedJobs.map(({ job, metCount }) => {
-                  const totalSelected = selectedFilters.length;
+          {/* Job Rows (not cards) + Job Detail Panel */}
+          {filteredJobs.length === 0 ? (
+            <EmptyState
+              title={t("templatesEmptySearch")}
+              description={t("jobsPrivateFilterHint")}
+              action={
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setLocationFilter("all");
+                    setTypeFilter("all");
+                  }}
+                >
+                  {t("templatesFilterAll")}
+                </Button>
+              }
+            />
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              {/* Job rows */}
+              <div className="lg:col-span-7 border-t border-b border-[var(--line)] divide-y divide-[var(--line)]">
+                {filteredJobs.map(({ job, metCount }) => {
+                  const selected = activeJob?.id === job.id;
+                  const totalSelected = selectedSupport.length;
                   return (
-                    <article key={job.id} className="mezgeb-card p-6 flex flex-col justify-between gap-5">
-                      <div className="space-y-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <h2 className="text-lg font-semibold text-[#111111]">{job.title[lang]}</h2>
-                            <p className="text-sm text-[#6B6B6B]">
-                              {job.employerType[lang]} · {job.remote ? t("jobsRemoteLabel") : job.city[lang]}
-                            </p>
-                          </div>
-                          <span
-                            className={`px-2.5 py-1 rounded-md text-xs font-semibold shrink-0 ${
-                              totalSelected > 0 && metCount === totalSelected
-                                ? "bg-[#E4F2EC] text-[#1F5C46]"
-                                : "bg-[#F5F5F3] text-[#6B6B6B]"
-                            }`}
-                          >
-                            {totalSelected > 0
-                              ? t("jobsMatchBadge", { met: metCount, total: totalSelected })
-                              : t("jobsNoFilterBadge")}
-                          </span>
-                        </div>
-
-                        <p className="text-sm text-[#111111]/85 leading-relaxed">{job.summary[lang]}</p>
-
-                        <div className="flex flex-wrap gap-1.5 pt-1">
-                          {job.offeredAccommodations.map((acc) => {
-                            const matched = selectedFilters.includes(acc);
-                            return (
-                              <span
-                                key={acc}
-                                className={`px-2.5 py-1 rounded-md text-xs font-medium ${
-                                  matched
-                                    ? "bg-[#E4F2EC] text-[#1F5C46] border border-[#1F5C46]/25"
-                                    : "bg-[#F5F5F3] text-[#6B6B6B]"
-                                }`}
+                    <article
+                      key={job.id}
+                      className={`py-5 px-4 transition-colors ${
+                        selected ? "bg-[var(--stone)]" : "bg-[var(--paper)] hover:bg-[var(--stone)]"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h2 className="text-lg font-semibold text-[var(--ink)]">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedJobId(job.id)}
+                                aria-current={selected ? "true" : undefined}
+                                className="text-left hover:underline underline-offset-4 cursor-pointer"
                               >
-                                {getAccomLabel(acc)}
-                                {matched ? " ✓" : ""}
-                              </span>
-                            );
-                          })}
+                                {job.title[lang]}
+                              </button>
+                            </h2>
+                            <Badge variant="neutral">{t("templatesSampleBadge")}</Badge>
+                          </div>
+                          <p className="text-sm text-[var(--muted)]">
+                            {job.employerType[lang]} ·{" "}
+                            {job.remote ? t("jobsRemoteLabel") : job.city[lang]}
+                          </p>
                         </div>
+
+                        {totalSelected > 0 && (
+                          <Badge
+                            variant={metCount === totalSelected ? "success" : "neutral"}
+                            icon={
+                              metCount === totalSelected ? (
+                                <Check size={13} strokeWidth={1.75} />
+                              ) : undefined
+                            }
+                          >
+                            {t("jobsMatchBadge", { met: metCount, total: totalSelected })}
+                          </Badge>
+                        )}
                       </div>
 
-                      <div className="pt-3 border-t border-[#E7E7E4]">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setApplicationResult(null);
-                            setApplyingJob(job);
-                          }}
-                          className="mezgeb-btn-primary text-sm"
-                        >
-                          <MicIcon size={15} />
-                          <span>{t("jobsApplyVoiceBtn")}</span>
-                        </button>
+                      <div className="flex flex-wrap gap-1.5 mt-3">
+                        {job.offeredAccommodations.map((acc) => {
+                          const matched = selectedSupport.includes(acc);
+                          return (
+                            <Badge
+                              key={acc}
+                              variant={matched ? "success" : "neutral"}
+                              icon={matched ? <Check size={12} strokeWidth={1.75} /> : undefined}
+                            >
+                              {getAccomPlainLabel(acc)}
+                            </Badge>
+                          );
+                        })}
                       </div>
                     </article>
                   );
                 })}
               </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-              <div className="lg:col-span-7 space-y-4">
-                <p className="text-sm text-[#6B6B6B]">{t("jobsEmployerIntro")}</p>
-                <MezgebWidget
-                  template={EMPLOYER_TEMPLATE}
-                  aiEnabled={true}
-                  offline={false}
-                  platformName="Mezgeb Jobs"
-                  storageKey="mezgeb_employer_job_v1"
-                  onComplete={handleEmployerComplete}
-                />
-              </div>
 
-              <div className="lg:col-span-5 mezgeb-card p-6 space-y-4">
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-base font-semibold text-[#111111]">{t("jobsEmployerOutputTitle")}</h2>
-                  {jobPostingJsonLd && (
-                    <button
-                      type="button"
-                      onClick={handleCopyJsonLd}
-                      className="inline-flex items-center gap-1.5 px-3 min-h-[34px] rounded-lg border border-[#E7E7E4] text-xs font-medium hover:bg-[#F5F5F3]"
-                    >
-                      <CopyIcon size={13} />
-                      <span>{copiedJsonLd ? t("copiedButton") : t("copyButton")}</span>
-                    </button>
-                  )}
-                </div>
-                <p className="text-xs text-[#6B6B6B]">{t("jobsEmployerExplain")}</p>
-                <pre className="p-4 rounded-xl bg-[#161616] text-[#E4F2EC] text-xs font-mono overflow-x-auto max-h-[420px]">
-                  <code>
-                    {jobPostingJsonLd
-                      ? JSON.stringify(jobPostingJsonLd, null, 2)
-                      : JSON.stringify(
-                          {
-                            "@context": "https://schema.org/",
-                            "@type": "JobPosting",
-                            title: "...",
-                            jobBenefits: [],
-                          },
-                          null,
-                          2
-                        )}
-                  </code>
-                </pre>
-              </div>
+              {/* Job detail panel */}
+              {activeJob && (
+                <aside
+                  aria-label={activeJob.title[lang]}
+                  className="lg:col-span-5 rounded-[10px] border border-[var(--line)] bg-[var(--paper)] p-6 space-y-6 lg:sticky lg:top-24"
+                >
+                  <div className="space-y-2 pb-4 border-b border-[var(--line)]">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="neutral">{t("templatesSampleBadge")}</Badge>
+                    </div>
+                    <h2 className="text-[1.375rem] font-semibold text-[var(--ink)]">
+                      {activeJob.title[lang]}
+                    </h2>
+                    <p className="text-sm text-[var(--muted)]">
+                      {activeJob.employerType[lang]} ·{" "}
+                      {activeJob.remote ? t("jobsRemoteLabel") : activeJob.city[lang]}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h3 className="text-base font-semibold text-[var(--ink)]">
+                      {t("jobsAboutHeading")}
+                    </h3>
+                    <p className="text-base text-[var(--ink)] leading-relaxed">
+                      {activeJob.summary[lang]}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h3 className="text-base font-semibold text-[var(--ink)]">
+                      {t("jobsNeedHeading")}
+                    </h3>
+                    <p className="text-sm text-[var(--muted)] leading-relaxed">
+                      {t("feat2Body")}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h3 className="text-base font-semibold text-[var(--ink)]">
+                      {t("jobsSupportHeading")}
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {activeJob.offeredAccommodations.map((acc) => (
+                        <Badge
+                          key={acc}
+                          variant={selectedSupport.includes(acc) ? "success" : "neutral"}
+                        >
+                          {getAccomPlainLabel(acc)}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 pt-3 border-t border-[var(--line)]">
+                    <h3 className="text-base font-semibold text-[var(--ink)]">
+                      {t("jobsHowToApplyHeading")}
+                    </h3>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <Button
+                        variant="primary"
+                        size="lg"
+                        fullWidth
+                        onClick={() => {
+                          setApplicationResult(null);
+                          setApplyMode("speak");
+                          setApplyingJob(activeJob);
+                        }}
+                      >
+                        {t("jobsApplyVoiceBtn")}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="lg"
+                        fullWidth
+                        onClick={() => {
+                          setApplicationResult(null);
+                          setApplyMode("type");
+                          setApplyingJob(activeJob);
+                        }}
+                      >
+                        {t("jobsApplyTypeBtn")}
+                      </Button>
+                    </div>
+                  </div>
+                </aside>
+              )}
             </div>
           )}
         </div>
       </section>
 
-      <AccessibleDialog
+      <Dialog
         open={Boolean(applyingJob)}
         onClose={() => setApplyingJob(null)}
         title={applyingJob ? t("jobsApplyDialogTitle", { title: applyingJob.title[lang] }) : ""}
         maxWidthClass="max-w-2xl"
+        closeLabel={t("closeButton")}
       >
         {applyingJob && (
           <div className="space-y-4">
             <MezgebWidget
-              key={applyingJob.id}
+              key={`${applyingJob.id}-${applyMode}`}
               template={JOB_APPLICATION_TEMPLATE}
               aiEnabled={true}
               offline={false}
+              initialAnswerMode={applyMode}
+              initialAnswers={
+                savedProfile
+                  ? ({
+                      ...savedProfile.rawAnswers,
+                      support_needs: savedProfile.supportNeedsInSession,
+                    } as MezgebAnswers)
+                  : undefined
+              }
               platformName={applyingJob.employerType[lang]}
               storageKey={`mezgeb_job_apply_${applyingJob.id}`}
               onComplete={(res) => {
@@ -331,17 +509,14 @@ export function JobsPage() {
             />
 
             {applicationResult && (
-              <div className="p-4 rounded-xl bg-[#E4F2EC] text-[#1F5C46] space-y-2">
-                <p className="text-sm font-semibold">{t("jobsApplyResultTitle")}</p>
-                <p className="text-xs">{t("jobsApplyResultNote")}</p>
-                <pre className="p-3 rounded-lg bg-[#161616] text-[#E4F2EC] text-xs font-mono overflow-x-auto">
-                  <code>{JSON.stringify(applicationResult, null, 2)}</code>
-                </pre>
-              </div>
+              <Banner variant="success">
+                <p className="font-semibold">{t("jobsApplyResultTitle")}</p>
+                <p className="text-xs mt-0.5">{t("jobsApplyResultNote")}</p>
+              </Banner>
             )}
           </div>
         )}
-      </AccessibleDialog>
+      </Dialog>
     </Layout>
   );
 }

@@ -1,8 +1,11 @@
+import { apiUrl } from "./apiBase";
+
 export interface OutboxRegistration {
   id: string;
   createdAt: string;
   profile: Record<string, unknown>;
   supportShared: boolean;
+  siteKey?: string;
 }
 
 const DB_NAME = "mezgeb_offline_db";
@@ -93,17 +96,18 @@ export async function flushOutbox(): Promise<
 
   for (const item of items) {
     try {
-      const res = await fetch("/api/registrations/outbox", {
+      const res = await fetch(apiUrl("/api/registrations/outbox"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(item),
       });
       if (res.ok) {
         const data = await res.json();
+        if (typeof data.token !== "string") continue;
         await removeOutboxItem(item.id);
         sent.push({
           outboxId: item.id,
-          token: String(data.token ?? `mzg_tok_${Math.random().toString(16).slice(2, 10)}`),
+          token: data.token,
           profile: item.profile,
         });
       }

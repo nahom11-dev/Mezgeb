@@ -1,19 +1,29 @@
 import React, { useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { CopyIcon } from "../components/Icons";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { ChevronDown, ChevronLeft, ChevronRight, Hash } from "lucide-react";
 import { Layout } from "../components/Layout";
-import { useLiveAnnouncer } from "../components/LiveAnnouncer";
 import { useI18n } from "../i18n";
+import { Badge, Banner, Button, CodeBlock, Table } from "../ui";
+
+interface DocEndpointSpec {
+  method: "GET" | "POST";
+  path: string;
+  requestFields?: { field: string; type: string; notes: string }[];
+  responseFields?: { field: string; type: string; notes: string }[];
+}
 
 interface DocSection {
   id: string;
   heading: string;
   body: string[];
+  callout?: { variant: "info" | "warning"; text: string };
+  endpoint?: DocEndpointSpec;
   code?: { title: string; content: string };
 }
 
 interface DocPageData {
   slug: string;
+  group: string;
   title: string;
   summary: string;
   sections: DocSection[];
@@ -22,8 +32,10 @@ interface DocPageData {
 const DOC_PAGES: DocPageData[] = [
   {
     slug: "quick-start",
+    group: "Get started",
     title: "Quick start",
-    summary: "Add Mezgeb to an existing sign-up page in five steps, keeping your own database and login.",
+    summary:
+      "Add Mezgeb to an existing sign-up page in four steps, keeping your own database and login.",
     sections: [
       {
         id: "pick-template",
@@ -74,21 +86,23 @@ const profile = await res.json();`,
   },
   {
     slug: "how-it-works",
+    group: "Get started",
     title: "How it works",
-    summary: "Three ways for learners to sign up, and a simple one-time token exchange for platforms.",
+    summary:
+      "Three ways for learners to sign up, and a one-time token exchange for platforms.",
     sections: [
       {
         id: "three-ways",
         heading: "Three ways to sign up, one confirmed profile",
         body: [
-          "1. Type or listen: one question per screen in plain Amharic or English, icons, read-aloud on every question, a 'Say it more simply' toggle, pre-written offline Help (Alt+H) on every screen, no time-outs, and instant autosave.",
+          "1. Type or listen: one question per screen in plain Amharic or English, icons, read-aloud on every question, a 'Show simpler words' toggle, pre-written offline Help (Alt+H) on every screen, no time-outs, and instant autosave.",
           "2. Speak: learners answer by voice in Amharic or English (including speaking to select options on choice screens) and always review and confirm the transcript before anything is saved.",
-          "3. With a partner: learners choose 'Refer me through a partner'; the profile records id_route: 'partner_pending' while the partner console shows only masked fields until the partner confirms identity ('partner_verified').",
+          "3. With a partner: learners choose 'A partner can vouch for me'; the profile records id_route: 'partner_pending' while the partner console shows only masked fields until the partner confirms identity ('partner_verified').",
         ],
       },
       {
         id: "token-flow",
-        heading: "Step-by-step token exchange & offline outbox",
+        heading: "Step-by-step token exchange and offline outbox",
         body: [
           "Step 1: Learner completes Mezgeb on your sign-up page and sees a clear 'What happens next' screen before confirmation.",
           "Step 2: If the learner is offline, the completed profile is stored in the browser's IndexedDB outbox (mezgeb_offline_db) without unshared support needs and flushed automatically when connectivity returns.",
@@ -99,9 +113,116 @@ const profile = await res.json();`,
     ],
   },
   {
+    slug: "embed",
+    group: "Embed",
+    title: "Embed",
+    summary:
+      "Add Mezgeb inline with the <mezgeb-register> element or launch it from a sign-up link.",
+    sections: [
+      {
+        id: "web-component",
+        heading: "Web component attributes",
+        body: [
+          "Use <mezgeb-register> when you want the one-question-per-screen flow rendered directly inside your own sign-up container.",
+        ],
+        code: {
+          title: "embed.html",
+          content: `<mezgeb-register
+  site-key="pk_live_learnhub"
+  template="learning-platform"
+  lang="am"
+  theme="light"
+></mezgeb-register>`,
+        },
+      },
+      {
+        id: "theming",
+        heading: "Theming and contrast protection",
+        body: [
+          "Mezgeb rejects accent colours below 4.5:1 contrast against white text. Primary action buttons remain solid black or high-contrast dark tones, and focus outlines stay 3px solid with a 2px offset.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "server-exchange",
+    group: "Server exchange",
+    title: "Server exchange",
+    summary:
+      "Exchange one-time registration tokens on your backend so personal data stays private.",
+    sections: [
+      {
+        id: "exchange-endpoint",
+        heading: "Token exchange endpoint",
+        body: [
+          "After the learner clicks Confirm, the browser receives a single-use token valid for five minutes. Call this endpoint from your server with your secret key.",
+        ],
+        callout: {
+          variant: "warning",
+          text: "Never put your sk_live_* secret key inside browser JavaScript or HTML.",
+        },
+        endpoint: {
+          method: "POST",
+          path: "/v1/registrations/exchange",
+          requestFields: [
+            { field: "token", type: "string", notes: "One-time token emitted by registration.completed" },
+          ],
+          responseFields: [
+            { field: "id", type: "string", notes: "Stable Mezgeb profile ID" },
+            { field: "name", type: "string", notes: "Confirmed learner name" },
+            { field: "id_route", type: "string", notes: "fayda, refugee_id, other_document, or partner_pending" },
+            { field: "support_shared", type: "boolean", notes: "True only when learner switched sharing ON" },
+          ],
+        },
+        code: {
+          title: "exchange-response.json",
+          content: `{
+  "id": "usr_8912a",
+  "name": "Hana Tesfaye",
+  "area": "lideta",
+  "id_route": "partner_pending",
+  "skills": ["Sales", "Bookkeeping"],
+  "support_shared": false
+}`,
+        },
+      },
+    ],
+  },
+  {
+    slug: "webhooks",
+    group: "Server exchange",
+    title: "Webhooks",
+    summary:
+      "Verify signed registration and profile update webhooks on your server.",
+    sections: [
+      {
+        id: "webhook-verify",
+        heading: "Verify X-Mezgeb-Signature",
+        body: [
+          "Mezgeb signs every webhook body with HMAC-SHA256 using your webhook secret. Verify the raw request body before updating your local user table.",
+        ],
+        code: {
+          title: "webhook-handler.ts",
+          content: `app.post("/webhooks/mezgeb", (req, res) => {
+  const sig = req.header("X-Mezgeb-Signature");
+  if (!verifyHmac(req.rawBody, sig, process.env.MEZGEB_WEBHOOK_SECRET)) {
+    return res.status(401).end();
+  }
+  if (req.body.event === "registration.completed") {
+    await db.users.upsert({ externalId: req.body.data.id, ...req.body.data });
+  }
+  res.status(200).json({ received: true });
+});`,
+        },
+      },
+    ],
+  },
+  {
     slug: "templates",
+    group: "Templates",
     title: "Templates",
-    summary: "Four starting templates designed with blind, Deaf, disabled, and displaced co-designers.",
+    summary:
+      "Four starting templates designed with blind, Deaf, disabled, and displaced co-designers.",
     sections: [
       {
         id: "four-templates",
@@ -114,24 +235,10 @@ const profile = await res.json();`,
         ],
       },
       {
-        id: "customising",
-        heading: "Customising templates",
+        id: "schema",
+        heading: "Question schema",
         body: [
-          "Keep one question per screen. Never combine two unrelated inputs on one step, and never request medical proof or diagnoses for support requests.",
-        ],
-      },
-    ],
-  },
-  {
-    slug: "schema",
-    title: "Form schema reference",
-    summary: "JSON structure for Mezgeb form templates and question types.",
-    sections: [
-      {
-        id: "question-types",
-        heading: "Supported question types",
-        body: [
-          "text, phone, date (Ethiopian calendar default with Gregorian toggle), choice, multichoice, id-routes (Fayda, Refugee ID, Other document, Partner refer), support (encrypted private accommodations), and work-story.",
+          "Supported types: text, phone, date, choice, multichoice, id-routes, support, work-story, yes-no, email, number, info, consent.",
         ],
         code: {
           title: "question.json",
@@ -148,30 +255,11 @@ const profile = await res.json();`,
     ],
   },
   {
-    slug: "theming",
-    title: "Theming",
-    summary: "Customise accent colours and fonts while preserving WCAG 2.2 AA contrast.",
-    sections: [
-      {
-        id: "contrast-protection",
-        heading: "How contrast is protected",
-        body: [
-          "Mezgeb rejects accent colours below 4.5:1 contrast against white text. Primary action buttons remain solid black (#111111) or high-contrast dark tones, and focus outlines remain 3px solid #6A4FC4 with a 2px offset.",
-        ],
-      },
-      {
-        id: "fonts",
-        heading: "Typography",
-        body: [
-          "Latin text uses Inter (minimum 16px body, never smaller than 13px). Amharic text uses Noto Sans Ethiopic with line height 1.75 so Ethiopic ascenders and descenders never collide.",
-        ],
-      },
-    ],
-  },
-  {
     slug: "accessibility",
+    group: "Accessibility",
     title: "Accessibility",
-    summary: "WCAG 2.2 AA compliance, screen reader behaviour, and keyboard support.",
+    summary:
+      "WCAG 2.2 AA compliance, screen reader behaviour, and keyboard support.",
     sections: [
       {
         id: "testing-matrix",
@@ -184,21 +272,23 @@ const profile = await res.json();`,
         id: "errors-and-focus",
         heading: "Read-aloud and error summaries",
         body: [
-          "Every question includes a Read aloud button. Validation errors appear in an alert summary at the top of the card that receives keyboard focus on submit, linked directly to each field via aria-describedby.",
+          "Every question includes a Read aloud button. Moving between widget steps moves focus to the new question heading and announces progress. Validation errors appear in an alert summary at the top of the card linked directly to each field.",
         ],
       },
     ],
   },
   {
-    slug: "ai-privacy",
-    title: "AI, privacy and low network",
-    summary: "AI is optional, self-hosted by default, and never sees learner answers during help requests.",
+    slug: "offline",
+    group: "Offline",
+    title: "Offline and privacy",
+    summary:
+      "AI is optional, self-hosted by default, and never sees learner answers during help requests.",
     sections: [
       {
         id: "three-levels",
         heading: "Three operating levels",
         body: [
-          "1. Browser / No AI: everything works offline or with AI switched off. Typing, read-aloud, Ethiopian calendar, IndexedDB outbox, SMS resume links, and pre-written help for every error code run locally.",
+          "1. Browser / No AI: typing, read-aloud, Ethiopian calendar, IndexedDB outbox, SMS resume links, and pre-written help for every error code run locally.",
           "2. Your server (default): speech transcription, skill suggestions, and optional help run on your own Docker host so learner audio and data never leave your infrastructure.",
           "3. Optional cloud: only enabled if explicitly configured by the platform administrator.",
         ],
@@ -208,13 +298,14 @@ const profile = await res.json();`,
         heading: "Privacy guarantees and opt-in sharing",
         body: [
           "The Help drawer (Alt+H) works offline using built-in guidance per error code and question type. When AI is on, requests include only field labels, types, button names, and error codes—never typed answers.",
-          "Support-need sharing switches are OFF by default, kept in session memory only (never written to localStorage), and a 'Clear this device' button removes saved browser data immediately. Voice recordings are discarded immediately after transcription.",
+          "Support-need sharing switches are OFF by default, kept in session memory only, and a 'Clear this device' button removes saved browser data immediately. Voice recordings are discarded immediately after transcription.",
         ],
       },
     ],
   },
   {
     slug: "self-hosting",
+    group: "Self-hosting",
     title: "Self-hosting",
     summary: "Run Mezgeb with Docker Compose in lite or full profile.",
     sections: [
@@ -223,10 +314,10 @@ const profile = await res.json();`,
         heading: "Lite and full profiles",
         body: [
           "The lite profile runs the form service, token exchange API, and encrypted storage with AI switched off (MEZGEB_SPEECH=off, MEZGEB_AI=off).",
-          "The full profile includes local speech transcription and local language assistance models. Exact hardware sizing is to be measured against your expected concurrent learners.",
+          "The full profile includes local speech transcription and local language assistance models.",
         ],
         code: {
-          title: "docker-compose",
+          title: "docker-compose.sh",
           content: `docker compose --profile lite up -d
 # Or with local speech & AI:
 docker compose --profile full up -d`,
@@ -236,51 +327,82 @@ docker compose --profile full up -d`,
   },
   {
     slug: "api",
-    title: "REST API",
-    summary: "Core endpoints, authentication with publishable vs secret keys, and webhook events.",
+    group: "API reference",
+    title: "API reference",
+    summary:
+      "Core endpoints, authentication with publishable vs secret keys, and JobPosting standards.",
     sections: [
       {
-        id: "auth",
-        heading: "Publishable vs secret keys",
+        id: "capabilities-endpoint",
+        heading: "Check server AI and voice capabilities",
         body: [
-          "Publishable keys (pk_*) are safe in HTML <mezgeb-register> attributes. Secret keys (sk_*) must only be used from your server to exchange tokens or manage forms.",
+          "Call GET /api/capabilities on boot to discover whether voice transcription, Smart Help, Skills AI, Simplify AI, and server read-aloud are available. Responses include voiceProvider and readAloudProviders per language (Addis AI, ElevenLabs, Gemini, or off).",
+          "GET /v1/mezgeb.js serves the <mezgeb-register> web component. Full spec: /openapi.yaml.",
         ],
+        endpoint: {
+          method: "GET",
+          path: "/api/capabilities",
+          responseFields: [
+            { field: "voice", type: "boolean", notes: "True if audio transcription endpoint is ready" },
+            { field: "help", type: "boolean", notes: "True if optional Smart Help AI is configured" },
+            { field: "simplify", type: "boolean", notes: "True if question simplification is enabled" },
+          ],
+        },
       },
       {
-        id: "endpoints",
-        heading: "Endpoints",
+        id: "voice-endpoint",
+        heading: "Transcribe voice answers",
         body: [
-          "GET /api/capabilities — check whether voice transcription, Smart Help, Skills AI, and Simplify AI are available on the running server.",
-          "POST /v1/registrations/exchange — exchange a one-time registration token for the confirmed profile.",
-          "POST /api/registrations/outbox — flush queued offline registrations upon reconnection.",
-          "POST /api/ai/voice — transcribe short <=1 MB audio clips (or match choice options), discarding audio immediately after.",
-          "POST /api/ai/simplify — rewrite a question in simpler wording (falls back to the template hint).",
+          "POST /api/ai/voice accepts short <=1 MB audio clips (16 kHz WAV preferred), discards audio immediately after transcription, and returns an editable transcript. By default Amharic uses Addis AI (when ADDIS_API_KEY is set) and English uses ElevenLabs (when ELEVENLABS_API_KEY is set); see README for MEZGEB_SPEECH overrides.",
         ],
+        endpoint: {
+          method: "POST",
+          path: "/api/ai/voice",
+        },
+      },
+      {
+        id: "tts-endpoint",
+        heading: "Read template text aloud",
+        body: [
+          "POST /api/tts returns MP3 audio for a question, hint, or error string (Amharic via Addis AI, English via ElevenLabs). Only template text is sent—never learner answers. MEZGEB_TTS=off forces the browser voice instead.",
+        ],
+        endpoint: {
+          method: "POST",
+          path: "/api/tts",
+        },
+      },
+      {
+        id: "outbox-endpoint",
+        heading: "Flush offline registrations",
+        body: [
+          "Queued offline registrations are posted to POST /api/registrations/outbox as soon as connectivity returns.",
+        ],
+        endpoint: {
+          method: "POST",
+          path: "/api/registrations/outbox",
+          requestFields: [
+            { field: "id", type: "string", notes: "Client outbox item UUID" },
+            { field: "templateId", type: "string", notes: "Template identifier" },
+            { field: "profile", type: "object", notes: "Confirmed learner fields (excludes unshared support)" },
+          ],
+          responseFields: [
+            { field: "ok", type: "boolean", notes: "True when saved" },
+            { field: "token", type: "string", notes: "Exchange token for the platform server" },
+          ],
+        },
         code: {
-          title: "POST /v1/registrations/exchange",
+          title: "outbox-flush.json",
           content: `{
-  "id": "usr_8912a",
-  "name": "Hana",
-  "area": "Lideta",
-  "id_route": "partner_pending",
-  "partner_org": "Addis Accessibility Centre (sample)",
-  "skills": ["Sales", "Bookkeeping"],
-  "support_shared": false
+  "ok": true,
+  "token": "mzg_tok_offline_9102"
 }`,
         },
       },
-    ],
-  },
-  {
-    slug: "jobposting",
-    title: "JobPosting",
-    summary: "Publish employer workplace accommodations using standard schema.org/JobPosting.",
-    sections: [
       {
-        id: "schema-org",
-        heading: "Structured accommodations for private job filtering",
+        id: "jobposting",
+        heading: "schema.org/JobPosting accommodations",
         body: [
-          "Employers declare offered accommodations in /jobs ('For employers'). Mezgeb publishes them inside standard JSON-LD (jobBenefits and mezgebAccommodations) so candidates can filter privately without disclosing their own needs before applying.",
+          "Employers publish workplace adjustments inside standard JSON-LD so candidates can filter privately on their own device.",
         ],
         code: {
           title: "jobposting.jsonld",
@@ -288,7 +410,6 @@ docker compose --profile full up -d`,
   "@context": "https://schema.org/",
   "@type": "JobPosting",
   "title": "Junior data clerk",
-  "hiringOrganization": { "@type": "Organization", "name": "Example Logistics" },
   "jobBenefits": ["screen_reader", "extra_time", "flexible_hours"],
   "mezgebAccommodations": ["screen_reader", "extra_time", "flexible_hours"]
 }`,
@@ -296,152 +417,320 @@ docker compose --profile full up -d`,
       },
     ],
   },
-  {
-    slug: "faq",
-    title: "FAQ",
-    summary: "Common questions from learners, partner organisations, and platform teams.",
-    sections: [
-      {
-        id: "questions",
-        heading: "Frequently asked questions",
-        body: [
-          "Does a learner need a Fayda ID? No. Learners can use Fayda, a refugee ID or another document, or choose 'Refer me' so a partner organisation can vouch for them.",
-          "Which languages does Mezgeb support? Amharic and English today. Afaan Oromo, Tigrinya and Somali are planned.",
-          "Does the AI see what learners type? No. The help assistant reads the page's labels and error messages, never the learner's answers.",
-          "What happens to voice recordings? They are deleted as soon as they are written down.",
-          "Do learners have to disclose a disability? No. Learners describe practical needs with no diagnosis or medical proof asked.",
-        ],
-      },
-    ],
-  },
+];
+
+const SLUG_ALIASES: Record<string, string> = {
+  theming: "embed",
+  schema: "templates",
+  "ai-privacy": "offline",
+  jobposting: "api",
+  faq: "how-it-works",
+};
+
+const NAV_GROUPS = [
+  "Get started",
+  "Embed",
+  "Server exchange",
+  "Templates",
+  "Accessibility",
+  "Offline",
+  "Self-hosting",
+  "API reference",
 ];
 
 export function DocsPage() {
   const { slug } = useParams<{ slug?: string }>();
+  const navigate = useNavigate();
   const { t } = useI18n();
-  const { announce } = useLiveAnnouncer();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const activeDoc = DOC_PAGES.find((d) => d.slug === slug) ?? DOC_PAGES[0];
-
-  const handleCopy = async (id: string, text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      // ignore
-    }
-    setCopiedId(id);
-    announce(t("copiedAnnouncement"));
-    window.setTimeout(() => setCopiedId(null), 2000);
-  };
+  const normalizedSlug = slug && SLUG_ALIASES[slug] ? SLUG_ALIASES[slug] : slug;
+  const activeIdx = DOC_PAGES.findIndex((d) => d.slug === normalizedSlug);
+  const resolvedIdx = activeIdx >= 0 ? activeIdx : 0;
+  const activeDoc = DOC_PAGES[resolvedIdx];
+  const prevDoc = resolvedIdx > 0 ? DOC_PAGES[resolvedIdx - 1] : null;
+  const nextDoc = resolvedIdx < DOC_PAGES.length - 1 ? DOC_PAGES[resolvedIdx + 1] : null;
 
   return (
     <Layout>
-      <div className="bg-[#F9F3EA] border-b border-[#E7E7E4] py-2.5 px-4 text-center text-xs font-medium text-[#111111]">
+      <div className="bg-[var(--sand)] border-b border-[var(--line)] py-2.5 px-4 text-left sm:text-center text-xs font-medium text-[var(--ink)]">
         {t("docsBanner")}
       </div>
 
-      <div className="max-w-[1200px] mx-auto px-4 sm:px-6 md:px-10 py-10 md:py-14">
-        {/* Mobile docs menu disclosure */}
+      <div className="mezgeb-container py-8 md:py-12">
+        {/* Mobile docs menu disclosure (< 1024px) */}
         <div className="lg:hidden mb-6">
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            fullWidth
             aria-expanded={sidebarOpen}
             aria-controls="docs-sidebar-nav"
             onClick={() => setSidebarOpen((v) => !v)}
-            className="mezgeb-btn-secondary w-full justify-between"
+            className="justify-between"
           >
-            <span>{t("docsMenuBtn")}</span>
-            <span>{activeDoc.title}</span>
-          </button>
+            <span>
+              {t("docsMenuBtn")}: {activeDoc.title}
+            </span>
+            <ChevronDown
+              size={16}
+              strokeWidth={1.75}
+              aria-hidden="true"
+              className={sidebarOpen ? "rotate-180" : ""}
+            />
+          </Button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
-          {/* Left sidebar navigation */}
+        {/* 3-column layout: 240px left nav, minmax(0, 720px) article, 200px right TOC (>= 1280px) */}
+        <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)_200px] gap-10 items-start">
+          {/* Left collapsible sidebar navigation */}
           <aside
             id="docs-sidebar-nav"
-            className={`lg:col-span-3 ${sidebarOpen ? "block" : "hidden lg:block"}`}
+            className={`${sidebarOpen ? "block" : "hidden lg:block"} lg:sticky lg:top-24`}
           >
-            <nav aria-label={t("docsNavTitle")} className="space-y-1">
-              <p className="text-xs font-semibold text-[#6B6B6B] px-3 pb-2">{t("docsNavTitle")}</p>
-              {DOC_PAGES.map((doc) => {
-                const isActive = doc.slug === activeDoc.slug;
+            <nav aria-label={t("docsNavTitle")} className="space-y-2">
+              {NAV_GROUPS.map((group) => {
+                const items = DOC_PAGES.filter((d) => d.group === group);
+                if (items.length === 0) return null;
                 return (
-                  <Link
-                    key={doc.slug}
-                    to={`/docs/${doc.slug}`}
-                    onClick={() => setSidebarOpen(false)}
-                    className={`block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      isActive
-                        ? "bg-[#EEEBF8] text-[#111111] font-semibold"
-                        : "text-[#6B6B6B] hover:text-[#111111] hover:bg-[#F5F5F3]"
-                    }`}
-                  >
-                    {doc.title}
-                  </Link>
+                  <details key={group} open className="group border-b border-[var(--line)] pb-2">
+                    <summary className="list-none cursor-pointer py-1.5 px-2 text-xs font-semibold uppercase tracking-[0.06em] text-[var(--muted)] hover:text-[var(--ink)] flex items-center justify-between">
+                      <span>{group}</span>
+                      <ChevronDown
+                        size={14}
+                        strokeWidth={1.75}
+                        aria-hidden="true"
+                        className="group-open:rotate-180"
+                      />
+                    </summary>
+                    <ul className="mt-1 space-y-0.5">
+                      {items.map((doc) => {
+                        const isActive = doc.slug === activeDoc.slug;
+                        return (
+                          <li key={doc.slug}>
+                            <Link
+                              to={`/docs/${doc.slug}`}
+                              onClick={() => setSidebarOpen(false)}
+                              aria-current={isActive ? "page" : undefined}
+                              className={`block px-3 py-2 rounded-[8px] text-sm font-medium min-h-[38px] ${
+                                isActive
+                                  ? "bg-[var(--accent-soft)] text-[var(--ink)] font-semibold"
+                                  : "text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--stone)]"
+                              }`}
+                            >
+                              {doc.title}
+                            </Link>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </details>
                 );
               })}
             </nav>
           </aside>
 
-          {/* Main article */}
-          <article className="lg:col-span-6 space-y-8 min-w-0">
-            <header className="space-y-2 pb-6 border-b border-[#E7E7E4]">
-              <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-[#111111]">
+          {/* Main article (max 720px) */}
+          <article className="min-w-0 max-w-[720px] space-y-6 text-left">
+            <header className="space-y-3 pb-6 border-b border-[var(--line)]">
+              <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--muted)]">
+                {activeDoc.group}
+              </p>
+              <h1 className="mezgeb-display-heading text-[2rem] sm:text-[2.25rem] font-semibold text-[var(--ink)]">
                 {activeDoc.title}
               </h1>
-              <p className="text-base text-[#6B6B6B] leading-relaxed">{activeDoc.summary}</p>
+              <p className="text-base text-[var(--muted)] leading-[1.7]">
+                {activeDoc.summary}
+              </p>
             </header>
 
-            <div className="space-y-10">
-              {activeDoc.sections.map((sec) => (
-                <section key={sec.id} aria-labelledby={sec.id} className="space-y-3 scroll-mt-24">
-                  <h2 id={sec.id} className="text-xl font-semibold text-[#111111]">
-                    {sec.heading}
+            <div>
+              {activeDoc.sections.map((sec, idx) => (
+                <section
+                  key={sec.id}
+                  aria-labelledby={sec.id}
+                  className={`${idx === 0 ? "mt-2" : "mt-12"} space-y-4 scroll-mt-24`}
+                >
+                  <h2
+                    id={sec.id}
+                    className="group text-[1.375rem] font-semibold text-[var(--ink)] flex items-center gap-2"
+                  >
+                    <span>{sec.heading}</span>
+                    <a
+                      href={`#${sec.id}`}
+                      aria-label={`Link to ${sec.heading}`}
+                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-[var(--muted)] hover:text-[var(--accent)] p-1 rounded-[6px]"
+                    >
+                      <Hash size={16} strokeWidth={1.75} aria-hidden="true" />
+                    </a>
                   </h2>
-                  {sec.body.map((para, idx) => (
-                    <p key={idx} className="text-[15px] leading-relaxed text-[#111111]/85">
+
+                  {sec.endpoint && (
+                    <div className="p-3.5 rounded-[10px] border border-[var(--line)] bg-[var(--stone)] flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+                        <Badge variant={sec.endpoint.method === "POST" ? "accent" : "success"}>
+                          {sec.endpoint.method}
+                        </Badge>
+                        <code className="font-mono text-sm text-[var(--ink)] break-all">
+                          {sec.endpoint.path}
+                        </code>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="md"
+                        onClick={() => navigate("/playground")}
+                      >
+                        {t("docsTryInPlayground")}
+                      </Button>
+                    </div>
+                  )}
+
+                  {sec.body.map((para, pIdx) => (
+                    <p key={pIdx} className="text-base leading-[1.7] text-[var(--ink)]">
                       {para}
                     </p>
                   ))}
-                  {sec.code && (
-                    <div className="rounded-xl bg-[#161616] text-white overflow-hidden mt-3">
-                      <div className="px-4 py-2 border-b border-white/10 flex items-center justify-between text-xs text-[#9B9B9B]">
-                        <span className="font-mono">{sec.code.title}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(`${activeDoc.slug}-${sec.id}`, sec.code!.content)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/10 text-white hover:bg-white/20 text-xs font-medium"
-                        >
-                          <CopyIcon size={12} />
-                          <span>
-                            {copiedId === `${activeDoc.slug}-${sec.id}`
-                              ? t("copiedButton")
-                              : t("copyButton")}
-                          </span>
-                        </button>
-                      </div>
-                      <pre className="p-4 text-xs font-mono leading-relaxed overflow-x-auto text-[#E4F2EC]">
-                        <code>{sec.code.content}</code>
-                      </pre>
+
+                  {sec.callout && (
+                    <Banner variant={sec.callout.variant}>{sec.callout.text}</Banner>
+                  )}
+
+                  {sec.endpoint?.requestFields && (
+                    <div className="space-y-2 pt-2">
+                      <h3 className="text-sm font-semibold text-[var(--ink)]">
+                        {t("docsEndpointReqTitle")}
+                      </h3>
+                      <Table
+                        rows={sec.endpoint.requestFields}
+                        getRowKey={(r) => `req-${r.field}`}
+                        columns={[
+                          {
+                            key: "field",
+                            header: "Field",
+                            render: (r) => <code className="font-mono text-xs">{r.field}</code>,
+                          },
+                          {
+                            key: "type",
+                            header: "Type",
+                            render: (r) => (
+                              <span className="text-xs font-mono text-[var(--muted)]">
+                                {r.type}
+                              </span>
+                            ),
+                          },
+                          {
+                            key: "notes",
+                            header: "Notes",
+                            render: (r) => <span className="text-xs text-[var(--ink)]">{r.notes}</span>,
+                          },
+                        ]}
+                      />
                     </div>
+                  )}
+
+                  {sec.endpoint?.responseFields && (
+                    <div className="space-y-2 pt-2">
+                      <h3 className="text-sm font-semibold text-[var(--ink)]">
+                        {t("docsEndpointResTitle")}
+                      </h3>
+                      <Table
+                        rows={sec.endpoint.responseFields}
+                        getRowKey={(r) => `res-${r.field}`}
+                        columns={[
+                          {
+                            key: "field",
+                            header: "Field",
+                            render: (r) => <code className="font-mono text-xs">{r.field}</code>,
+                          },
+                          {
+                            key: "type",
+                            header: "Type",
+                            render: (r) => (
+                              <span className="text-xs font-mono text-[var(--muted)]">
+                                {r.type}
+                              </span>
+                            ),
+                          },
+                          {
+                            key: "notes",
+                            header: "Notes",
+                            render: (r) => <span className="text-xs text-[var(--ink)]">{r.notes}</span>,
+                          },
+                        ]}
+                      />
+                    </div>
+                  )}
+
+                  {sec.code && (
+                    <CodeBlock
+                      filename={sec.code.title}
+                      code={sec.code.content}
+                      copyLabel={t("copyCodeBtn")}
+                      copiedLabel={t("copiedButton")}
+                      copiedAnnouncement={t("copiedAnnouncement")}
+                    />
                   )}
                 </section>
               ))}
             </div>
+
+            {/* Previous / Next navigation */}
+            <nav
+              aria-label="Documentation pagination"
+              className="mt-12 pt-6 border-t border-[var(--line)] grid grid-cols-1 sm:grid-cols-2 gap-4"
+            >
+              <div>
+                {prevDoc && (
+                  <Link
+                    to={`/docs/${prevDoc.slug}`}
+                    className="inline-flex items-center gap-2 p-3 rounded-[10px] border border-[var(--line)] hover:bg-[var(--stone)] w-full text-left"
+                  >
+                    <ChevronLeft size={16} strokeWidth={1.75} aria-hidden="true" />
+                    <span className="min-w-0">
+                      <span className="block text-xs text-[var(--muted)]">
+                        {t("docsPrevPage")}
+                      </span>
+                      <span className="block text-sm font-semibold text-[var(--ink)] truncate">
+                        {prevDoc.title}
+                      </span>
+                    </span>
+                  </Link>
+                )}
+              </div>
+              <div className="sm:text-right">
+                {nextDoc && (
+                  <Link
+                    to={`/docs/${nextDoc.slug}`}
+                    className="inline-flex items-center justify-between sm:justify-end gap-2 p-3 rounded-[10px] border border-[var(--line)] hover:bg-[var(--stone)] w-full text-left sm:text-right"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-xs text-[var(--muted)]">
+                        {t("docsNextPage")}
+                      </span>
+                      <span className="block text-sm font-semibold text-[var(--ink)] truncate">
+                        {nextDoc.title}
+                      </span>
+                    </span>
+                    <ChevronRight size={16} strokeWidth={1.75} aria-hidden="true" />
+                  </Link>
+                )}
+              </div>
+            </nav>
           </article>
 
-          {/* Right "On this page" TOC */}
-          <aside className="hidden lg:block lg:col-span-3 sticky top-24">
-            <nav aria-label={t("docsOnThisPage")} className="space-y-2 border-l border-[#E7E7E4] pl-4">
-              <p className="text-xs font-semibold text-[#6B6B6B]">{t("docsOnThisPage")}</p>
+          {/* Right "On this page" sticky TOC (hidden under 1280px) */}
+          <aside className="hidden xl:block sticky top-24">
+            <nav aria-label={t("docsOnThisPage")} className="space-y-2 border-l border-[var(--line)] pl-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--muted)]">
+                {t("docsOnThisPage")}
+              </p>
               <ul className="space-y-2 text-xs">
                 {activeDoc.sections.map((sec) => (
                   <li key={sec.id}>
                     <a
                       href={`#${sec.id}`}
-                      className="text-[#6B6B6B] hover:text-[#111111] block py-0.5"
+                      className="text-[var(--muted)] hover:text-[var(--ink)] block py-1 leading-snug"
                     >
                       {sec.heading}
                     </a>

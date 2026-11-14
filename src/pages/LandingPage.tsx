@@ -1,847 +1,396 @@
-import React, { useRef, useState } from "react";
+import React from "react";
 import { Link } from "react-router-dom";
-import { AccessibleDialog } from "../components/AccessibleDialog";
-import {
-  ArrowRightIcon,
-  CheckIcon,
-  CopyIcon,
-  LockIcon,
-  MicIcon,
-  PlayIcon,
-  SearchIcon,
-  ShieldIcon,
-  VolumeIcon,
-} from "../components/Icons";
+import { Play } from "lucide-react";
 import { Layout } from "../components/Layout";
-import { useLiveAnnouncer } from "../components/LiveAnnouncer";
 import { useI18n } from "../i18n";
+import { Badge, Button, CodeBlock, Field, VoiceButton } from "../ui";
 
-const VIDEO_ID = "";
+const WAVE_LEFT = [120, 135, 110, 125, 95, 105, 85, 115, 70, 90, 60, 75, 45, 55, 35, 40, 28, 32, 20];
+const WAVE_CENTER = [18, 24, 16, 22, 18];
+const WAVE_RIGHT = [20, 34, 28, 45, 38, 65, 50, 80, 70, 98, 85, 120, 95, 130, 115, 125, 105, 130];
 
-const WAVEFORM_BARS = [
-  16, 28, 42, 58, 72, 84, 66, 48, 34, 24, 18, 12, 10, 14, 22, 34, 48, 64, 78, 88, 70, 52, 36, 22, 14,
-  10, 12, 18, 28, 44, 62, 80, 68, 50, 32, 20,
-];
+const embedCode = `<script type="module" src="https://cdn.mezgeb.example/v1/mezgeb.js"></script>
+<mezgeb-register site-key="pk_yoursite" lang="am"></mezgeb-register>`;
 
-const MINI_WAVEFORM_BARS = [8, 14, 20, 12, 24, 18, 10, 22, 26, 16, 12, 24, 18, 14, 20, 10, 16, 22, 12, 8];
+const webhookCode = `POST /v1/registrations/exchange
+{
+  "event": "registration.completed",
+  "template_id": "learning-platform",
+  "profile": { "name": "…", "lang": "am" }
+}
+// 200 OK`;
 
 export function LandingPage() {
   const { t } = useI18n();
-  const { announce } = useLiveAnnouncer();
-  const videoSectionRef = useRef<HTMLDivElement>(null);
-
-  const [videoPlaying, setVideoPlaying] = useState(false);
-  const [ccEnabled, setCcEnabled] = useState(true);
-  const [transcriptOpen, setTranscriptOpen] = useState(false);
-  const [codeCopied, setCodeCopied] = useState(false);
-
-  // Interactive preview toggles in Feature 3 tile so every toggle is wired
-  const [sharePlatform, setSharePlatform] = useState(true);
-  const [shareEmployers, setShareEmployers] = useState(false);
-  const [sharePartner, setSharePartner] = useState(false);
-
-  const snippetCode = `<script type="module" src="https://cdn.mezgeb.example/v1/mezgeb.js"></script>\n<mezgeb-register site-key="pk_learnhub" lang="am"></mezgeb-register>`;
-
-  const handleCopySnippet = async () => {
-    try {
-      await navigator.clipboard.writeText(snippetCode);
-    } catch {
-      // Clipboard fallback ignored cleanly
-    }
-    setCodeCopied(true);
-    announce(t("copiedButton"));
-    window.setTimeout(() => setCodeCopied(false), 2000);
-  };
 
   return (
-    <Layout showFaqInFooter>
-      {/* 4.1 HERO */}
+    <Layout showFaqInFooter showGiantWordmark headerVariant="overlay">
       <section
         aria-labelledby="hero-heading"
-        style={{
-          background: "linear-gradient(180deg, #E4F2EC 0%, #EEEBF8 100%)",
-        }}
-        className="pt-12 md:pt-20 pb-16 md:pb-24"
+        className="relative overflow-hidden mz-hero-gradient min-h-screen pb-24 pt-16"
       >
-        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 md:px-10">
-          <div className="max-w-[640px] space-y-6">
-            <h1
-              id="hero-heading"
-              className="text-4xl sm:text-5xl md:text-[56px] font-bold tracking-[-0.03em] leading-[1.08] text-[#111111]"
-            >
-              {t("heroTitleLine1")}
-              <br />
-              {t("heroTitleLine2")}
-            </h1>
-            <p className="text-[18px] leading-[1.6] text-[#111111]/80 max-w-[560px]">
-              {t("heroSubtitle")}
-            </p>
-            <div className="flex flex-wrap items-center gap-3 pt-1">
-              <Link to="/demo" className="mezgeb-btn-primary">
-                {t("heroCtaDemo")}
-              </Link>
+        <div className="max-w-4xl mx-auto px-4 pt-8 md:pt-12 pb-12 text-center relative z-20">
+          <h1
+            id="hero-heading"
+            className="mezgeb-display-heading text-5xl sm:text-6xl md:text-[4.75rem] leading-[1.05] font-extrabold tracking-[-0.03em] text-[var(--ink)] mb-6"
+          >
+            <span className="block">{t("landingHeroH1Line1")}</span>
+            <span className="block">{t("landingHeroH1Line2")}</span>
+          </h1>
+          <p className="text-base sm:text-lg text-[var(--muted)] max-w-xl mx-auto leading-relaxed mb-10">
+            {t("heroSubtitle")}
+          </p>
+          <Link
+            to="/partner"
+            className="inline-flex items-center justify-center px-8 py-3.5 rounded-full bg-[#C9A7F5] text-[var(--ink)] font-semibold text-base hover:brightness-95 active:scale-[0.98] transition-all shadow-md ring-8 ring-white/40"
+          >
+            {t("navPilotCta")}
+          </Link>
+          <p className="text-[13px] text-[var(--muted)] font-medium mt-4">{t("heroPilotSubline")}</p>
+        </div>
+
+        <div className="relative w-full max-w-6xl mx-auto px-4">
+          <HeroWaveform />
+          <div className="relative z-10 max-w-[1000px] mx-auto p-3 rounded-[28px] bg-white/60 backdrop-blur-md border border-white/80 shadow-[0_24px_50px_-12px_rgba(20,32,27,0.12)]">
+            <div className="relative rounded-[18px] overflow-hidden bg-[#F9FAF9] border border-[var(--line)] min-h-[420px]">
+              <span className="absolute top-4 left-4 z-20 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/65 backdrop-blur-md text-white text-xs font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                {t("heroVideoPosterBadge")}
+              </span>
               <button
                 type="button"
-                onClick={() => videoSectionRef.current?.scrollIntoView({ behavior: "smooth" })}
-                className="mezgeb-btn-secondary"
+                aria-label={t("heroVideoPlayLabel")}
+                className="absolute inset-0 z-10 flex items-center justify-center"
               >
-                {t("heroCtaWatch")}
+                <span className="w-16 h-16 rounded-full bg-white shadow-2xl flex items-center justify-center hover:scale-110 transition-transform">
+                  <Play size={28} className="ml-1 text-[var(--ink)]" fill="currentColor" aria-hidden="true" />
+                </span>
               </button>
-            </div>
-          </div>
-
-          {/* Wide inset panel with faint lavender waveform and two overlapping app windows */}
-          <div
-            ref={videoSectionRef}
-            className="mt-12 md:mt-14 relative rounded-[16px] bg-white/75 border border-[#DCE3E0] p-4 sm:p-6 md:p-10 overflow-hidden"
-          >
-            {/* Background waveform lines: tallest at left & right edges, fading toward center */}
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 flex items-center justify-between px-4 opacity-50"
-            >
-              {WAVEFORM_BARS.map((h, i) => {
-                const distFromCenter = Math.abs(i - WAVEFORM_BARS.length / 2) / (WAVEFORM_BARS.length / 2);
-                const opacity = 0.25 + distFromCenter * 0.75;
-                return (
-                  <span
-                    key={i}
-                    className="w-[2px] rounded-full bg-[#C9B8F2]"
-                    style={{ height: `${h * 2.2}px`, opacity }}
-                  />
-                );
-              })}
-            </div>
-
-            <div className="relative z-10 flex flex-col lg:block min-h-0 lg:min-h-[470px]">
-              {/* Back-right larger window (~70% width on desktop) */}
-              <div className="lg:ml-auto lg:w-[70%] mezgeb-card overflow-hidden">
-                <div className="px-4 py-2.5 border-b border-[#E7E7E4] bg-[#F5F5F3] flex items-center justify-between text-xs font-medium text-[#6B6B6B]">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex gap-1.5" aria-hidden="true">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#D8D8D4]" />
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#D8D8D4]" />
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#D8D8D4]" />
-                    </span>
-                    <span>{t("heroVideoWindowTitle")}</span>
-                  </div>
-                  <span className="text-[#6B6B6B]">{t("heroVideoPosterBadge")}</span>
+              <div className="absolute bottom-4 left-4 right-4 z-20 flex flex-wrap items-end justify-between gap-2">
+                <div className="px-4 py-2 rounded-full bg-white/90 backdrop-blur-md border border-white/70 text-xs font-semibold text-[var(--ink)]">
+                  {t("heroVideoTitle")} · 2 min
                 </div>
-
-                {/* 16:9 Video embed or coming-soon poster */}
-                <div className="aspect-video bg-[#FAF9F6] relative">
-                  {VIDEO_ID && videoPlaying ? (
-                    <iframe
-                      className="w-full h-full border-0"
-                      src={`https://www.youtube-nocookie.com/embed/${VIDEO_ID}?autoplay=1&cc_load_policy=${
-                        ccEnabled ? 1 : 0
-                      }&rel=0`}
-                      title={t("heroVideoTitle")}
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                    />
-                  ) : (
-                    <div className="w-full h-full p-5 sm:p-8 flex flex-col justify-between relative bg-gradient-to-br from-white to-[#F5F5F3]">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-medium text-[#6B6B6B]">learnhub.et · Step 3 of 6</span>
-                        <span className="px-2.5 py-1 rounded-md bg-[#EEEBF8] text-[#6A4FC4] text-xs font-medium">
-                          {t("heroVideoEthSwitch")}
-                        </span>
-                      </div>
-
-                      <div className="my-auto max-w-md mx-auto w-full bg-white rounded-xl border border-[#E7E7E4] p-4 sm:p-5 shadow-xs space-y-3">
-                        <p className="text-lg sm:text-xl font-semibold text-[#111111]">
-                          {t("heroVideoQuestionAm")}
-                        </p>
-                        <p className="text-xs text-[#6B6B6B]">{t("heroVideoQuestionEn")}</p>
-
-                        <div className="flex items-center gap-3 pt-1">
-                          <div className="flex-1">
-                            <div className="min-h-[40px] px-3 rounded-lg border-2 border-red-500 bg-red-50/40 flex items-center text-sm text-[#6B6B6B]">
-                              {t("heroVideoYearPlaceholder")}
-                            </div>
-                            <p className="text-xs text-red-700 mt-1">{t("heroVideoYearError")}</p>
-                          </div>
-                          <div
-                            aria-hidden="true"
-                            className="w-11 h-11 rounded-full bg-[#111111] text-white flex items-center justify-center shrink-0"
-                          >
-                            <MicIcon size={18} />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-center">
-                        {VIDEO_ID ? (
-                          <button
-                            type="button"
-                            onClick={() => setVideoPlaying(true)}
-                            aria-label={t("heroVideoPlayLabel")}
-                            className="w-16 h-16 rounded-full bg-white border border-[#E7E7E4] text-[#111111] shadow-lg flex items-center justify-center hover:scale-105 transition-transform"
-                          >
-                            <PlayIcon size={24} className="ml-0.5" />
-                          </button>
-                        ) : (
-                          <p className="px-4 py-2 rounded-lg bg-white border border-[#E7E7E4] text-sm font-medium text-[#111111]">
-                            {t("heroVideoComingSoon")}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Below video: CC and Transcript controls */}
-                <div className="px-4 py-2.5 border-t border-[#E7E7E4] bg-white flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCcEnabled((v) => !v)}
-                      aria-pressed={ccEnabled}
-                      className={`px-2.5 min-h-[30px] rounded-md border font-mono font-semibold ${
-                        ccEnabled
-                          ? "bg-[#111111] text-white border-[#111111]"
-                          : "bg-white text-[#111111] border-[#E7E7E4]"
-                      }`}
-                    >
-                      {t("heroVideoCC")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTranscriptOpen(true)}
-                      className="px-3 min-h-[30px] rounded-md border border-[#E7E7E4] bg-white text-[#111111] font-medium hover:bg-[#F5F5F3]"
-                    >
-                      {t("heroVideoTranscript")}
-                    </button>
-                  </div>
-                  <span className="text-[#6B6B6B]">{t("demoSampleBadge")}</span>
+                <div className="hidden sm:flex gap-2">
+                  <span className="px-3 py-1.5 rounded-full bg-white/85 text-[11px] font-medium border border-white/70">
+                    {t("heroVideoCC")}
+                  </span>
+                  <span className="px-3 py-1.5 rounded-full bg-white/85 text-[11px] font-medium border border-white/70">
+                    Audio described
+                  </span>
+                  <span className="px-3 py-1.5 rounded-full bg-white/85 text-[11px] font-medium border border-white/70">
+                    {t("heroVideoTranscript")}
+                  </span>
                 </div>
               </div>
 
-              {/* Front-left smaller window (~45% width on desktop, overlapping bottom-left) */}
-              <div className="mt-6 lg:mt-0 lg:w-[45%] lg:absolute lg:left-0 lg:bottom-0 mezgeb-card p-5 space-y-4">
-                <div className="flex items-center justify-between border-b border-[#E7E7E4] pb-2.5 text-xs font-medium text-[#6B6B6B]">
-                  <span>{t("heroFrontWindowTitle")}</span>
-                  <span>4 / 6</span>
-                </div>
-
-                {/* Compact step list */}
-                <ol className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-[#6B6B6B]">
-                  <li className="text-[#1F5C46] font-medium">✓ {t("heroStep1")}</li>
-                  <li className="text-[#1F5C46] font-medium">✓ {t("heroStep2")}</li>
-                  <li className="text-[#1F5C46] font-medium">✓ {t("heroStep3")}</li>
-                  <li className="text-[#111111] font-semibold underline decoration-[#8F6FE0] decoration-2 underline-offset-4">
-                    {t("heroStep4")}
-                  </li>
-                  <li>{t("heroStep5")}</li>
-                  <li>{t("heroStep6")}</li>
-                </ol>
-
-                <div className="space-y-2.5">
-                  <p className="text-base font-semibold text-[#111111]">{t("heroCurrentQuestion")}</p>
-                  <div className="grid grid-cols-2 gap-2 text-xs font-medium">
-                    <div className="px-3 py-2.5 rounded-lg border border-[#E7E7E4] text-[#6B6B6B]">
-                      {t("heroOptFayda")}
-                    </div>
-                    <div className="px-3 py-2.5 rounded-lg border border-[#E7E7E4] text-[#6B6B6B]">
-                      {t("heroOptRefugee")}
-                    </div>
-                    <div className="px-3 py-2.5 rounded-lg border border-[#E7E7E4] text-[#6B6B6B]">
-                      {t("heroOptOther")}
-                    </div>
-                    <div className="px-3 py-2.5 rounded-lg border-2 border-[#8F6FE0] bg-[#EEEBF8] text-[#111111] font-semibold">
-                      {t("heroOptPartner")}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="px-3 py-2 rounded-lg bg-[#E4F2EC] text-[#1F5C46] text-xs font-medium">
-                  {t("heroPartnerNotice")}
-                </div>
-
-                <Link to="/demo" className="w-full mezgeb-btn-primary text-sm">
-                  {t("heroContinue")}
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* 4.2 WHY SECTION (#F9F3EA) */}
-      <section aria-labelledby="why-heading" className="bg-[#F9F3EA] py-20 md:py-28">
-        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 md:px-10">
-          <div className="max-w-[760px] space-y-7">
-            <h2 id="why-heading" className="text-sm font-semibold text-[#6A4FC4]">
-              {t("whyLabel")}
-            </h2>
-
-            <div className="space-y-6 text-2xl sm:text-3xl md:text-[36px] font-semibold leading-[1.3] tracking-[-0.02em]">
-              <p className="text-[#111111]">{t("whyP1")}</p>
-
-              <p className="text-[#6B6560]">
-                {t("whyP2Lead")}
-                <span className="text-[#111111]">{t("whyP2Bold1")}</span>
-                {t("whyP2Mid")}
-                <span className="text-[#111111]">{t("whyP2Bold2")}</span>
-              </p>
-
-              <p className="text-[#6B6560]">
-                {t("whyP3Lead")}
-                <span className="text-[#111111]">{t("whyP3Bold")}</span>
-                {t("whyP3Tail")}
-              </p>
-
-              <p className="text-[#111111]">{t("whyP4")}</p>
-            </div>
-
-            <p className="text-[13px] text-[#6B6560] pt-2">{t("whySources")}</p>
-          </div>
-        </div>
-      </section>
-
-      {/* 4.3 FEATURES CHECKERBOARD */}
-      <section aria-labelledby="features-heading" className="bg-white py-20 md:py-24">
-        <div className="max-w-[920px] mx-auto px-4 sm:px-6">
-          <h2 id="features-heading" className="sr-only">
-            {t("featuresSectionTitle")}
-          </h2>
-
-          <div className="space-y-12 md:space-y-0">
-            {/* Row 1: Tile Left, Text Right */}
-            <div className="grid grid-cols-1 md:grid-cols-2">
-              <div className="bg-[#F5F5F3] rounded-[24px] p-6 sm:p-8 flex flex-col justify-center gap-3 md:min-h-[440px]">
-                {/* SMS notification card */}
-                <div className="mezgeb-card p-3.5 flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-[#111111] text-white font-bold text-sm flex items-center justify-center shrink-0">
-                    L
-                  </div>
-                  <div className="text-xs leading-relaxed">
-                    <p className="font-semibold text-[#111111]">{t("feat1SmsSender")}</p>
-                    <p className="text-[#6B6B6B]">
-                      {t("feat1SmsText")}{" "}
-                      <span className="text-[#6A4FC4] underline font-medium">{t("feat1SmsLink")}</span>
-                    </p>
-                  </div>
-                </div>
-
-                {/* Resume card */}
-                <div className="mezgeb-card p-4 space-y-3.5">
-                  <div>
-                    <p className="text-base font-semibold text-[#111111]">{t("feat1ResumeTitle")}</p>
-                    <p className="text-xs text-[#6B6B6B]">{t("feat1ResumeSub")}</p>
-                  </div>
-
-                  <div className="w-full h-1 bg-[#E7E7E4] rounded-full overflow-hidden">
-                    <div className="h-full w-2/3 bg-[#8F6FE0]" />
-                  </div>
-
-                  <ul className="space-y-2 text-xs">
-                    {[
-                      [t("feat1Row1Label"), t("feat1Row1Val")],
-                      [t("feat1Row2Label"), t("feat1Row2Val")],
-                      [t("feat1Row3Label"), t("feat1Row3Val")],
-                    ].map(([label, val], i) => (
-                      <li key={i} className="flex items-center justify-between gap-2">
-                        <span className="flex items-center gap-2 text-[#6B6B6B]">
-                          <span className="w-4 h-4 rounded-full bg-[#E4F2EC] text-[#1F5C46] inline-flex items-center justify-center shrink-0">
-                            <CheckIcon size={11} />
-                          </span>
-                          <span>{label}</span>
-                        </span>
-                        <span className="font-medium text-[#111111]">{val}</span>
-                      </li>
-                    ))}
-                  </ul>
-
-                  <div className="space-y-1.5 pt-1">
-                    <Link to="/demo" className="w-full mezgeb-btn-primary text-xs min-h-[38px]">
-                      {t("feat1ResumeBtn")}
-                    </Link>
-                    <p className="text-center text-[11px] text-[#6B6B6B]">{t("feat1NoLimit")}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-col justify-center p-4 sm:p-8 md:p-12 space-y-3">
-                <p className="text-xs font-semibold text-[#6A4FC4]">{t("feat1Label")}</p>
-                <h3 className="text-[26px] font-semibold tracking-tight leading-snug text-[#111111]">
-                  {t("feat1HeadingLine1")}
-                  <br />
-                  {t("feat1HeadingLine2")}
-                </h3>
-                <p className="text-[15px] text-[#6B6B6B] leading-relaxed">{t("feat1Body")}</p>
-              </div>
-            </div>
-
-            {/* Row 2: Text Left, Tile Right */}
-            <div className="grid grid-cols-1 md:grid-cols-2">
-              <div className="order-2 md:order-1 flex flex-col justify-center p-4 sm:p-8 md:p-12 space-y-3">
-                <p className="text-xs font-semibold text-[#6A4FC4]">{t("feat2Label")}</p>
-                <h3 className="text-[26px] font-semibold tracking-tight leading-snug text-[#111111]">
-                  {t("feat2HeadingLine1")}
-                  <br />
-                  {t("feat2HeadingLine2")}
-                </h3>
-                <p className="text-[15px] text-[#6B6B6B] leading-relaxed">{t("feat2Body")}</p>
-              </div>
-
-              <div className="order-1 md:order-2 bg-[#F5F5F3] rounded-[24px] p-6 sm:p-8 flex flex-col justify-center md:min-h-[440px]">
-                <div className="mezgeb-card p-4 sm:p-5 space-y-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-[#111111]">{t("feat2CardTitle")}</p>
-                    <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-[#F5F5F3] text-[#6B6B6B]">
-                      {t("feat2CardTag")}
-                    </span>
-                  </div>
-
-                  <p className="p-3 rounded-lg bg-[#F5F5F3] text-xs leading-relaxed text-[#111111]">
-                    {t("feat2TranscriptPart1")}
-                    <span className="bg-[#EEEBF8] border-b-2 border-[#8F6FE0] px-0.5">
-                      {t("feat2TranscriptHl1")}
-                    </span>
-                    {t("feat2TranscriptPart2")}
-                    <span className="bg-[#EEEBF8] border-b-2 border-[#8F6FE0] px-0.5">
-                      {t("feat2TranscriptHl2")}
-                    </span>
-                    {t("feat2TranscriptPart3")}
-                    <span className="bg-[#EEEBF8] border-b-2 border-[#8F6FE0] px-0.5">
-                      {t("feat2TranscriptHl3")}
-                    </span>
-                    {t("feat2TranscriptPart4")}
-                    <span className="bg-[#EEEBF8] border-b-2 border-[#8F6FE0] px-0.5">
-                      {t("feat2TranscriptHl4")}
-                    </span>
-                    {t("feat2TranscriptPart5")}
+              <div className="p-6 md:p-10 grid grid-cols-1 md:grid-cols-12 gap-8 items-start pt-24 md:pt-20">
+                <div className="md:col-span-8 space-y-4 text-left">
+                  <p lang="am" className="text-xl font-semibold text-[var(--ink)]">
+                    {t("heroVideoQuestionAm")}
                   </p>
-
-                  <div className="space-y-2">
-                    <p className="text-[11px] font-semibold text-[#6B6B6B]">{t("feat2SkillsLabel")}</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        [1, t("feat2Skill1")],
-                        [2, t("feat2Skill2")],
-                        [3, t("feat2Skill3")],
-                        [4, t("feat2Skill4")],
-                      ].map(([num, label]) => (
-                        <span
-                          key={String(num)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#EEEBF8] text-[#111111] text-xs font-medium"
+                  <p lang="en" className="text-sm text-[var(--muted)]">
+                    {t("heroVideoQuestionEn")}
+                  </p>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <Badge variant="neutral">{t("heroVideoEthSwitch")}</Badge>
+                    <div className="flex gap-2">
+                      {["12", "Meskerem", t("heroVideoYearPlaceholder")].map((v, i) => (
+                        <div
+                          key={i}
+                          className="h-10 min-w-[72px] px-3 rounded-lg border border-[var(--line)] bg-white flex items-center text-sm text-[var(--muted)]"
                         >
-                          <span className="w-4 h-4 rounded-full bg-[#8F6FE0] text-white text-[10px] font-bold inline-flex items-center justify-center">
-                            {num}
-                          </span>
-                          <span>{label}</span>
-                        </span>
+                          {v}
+                        </div>
                       ))}
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-full border border-dashed border-[#C8C8C4] text-[#6B6B6B] text-xs">
-                        {t("feat2AddSkill")}
-                      </span>
                     </div>
                   </div>
-
-                  <div className="pt-2 border-t border-[#E7E7E4] flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-8 h-8 rounded-full bg-[#111111] text-white inline-flex items-center justify-center shrink-0">
-                        <MicIcon size={14} />
-                      </span>
-                      <div className="flex items-center gap-[2px]" aria-hidden="true">
-                        {MINI_WAVEFORM_BARS.map((h, idx) => (
-                          <span
-                            key={idx}
-                            className="w-[2px] rounded-full bg-[#8F6FE0]"
-                            style={{ height: `${h}px` }}
-                          />
-                        ))}
-                      </div>
-                      <span className="font-mono text-[11px] text-[#6B6B6B]">0:14</span>
-                    </div>
-                    <Link to="/demo" className="mezgeb-btn-secondary px-3 min-h-[34px] text-xs">
-                      {t("feat2KeepBtn")}
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Row 3: Tile Left, Text Right */}
-            <div className="grid grid-cols-1 md:grid-cols-2">
-              <div className="bg-[#F5F5F3] rounded-[24px] p-6 sm:p-8 flex flex-col justify-center md:min-h-[440px]">
-                <div className="mezgeb-card p-4 sm:p-5 space-y-4">
-                  <div className="flex items-start gap-2.5">
-                    <span className="mt-0.5 text-[#6A4FC4]">
-                      <LockIcon size={16} />
-                    </span>
-                    <div>
-                      <p className="text-sm font-semibold text-[#111111]">{t("feat3CardTitle")}</p>
-                      <p className="text-xs text-[#6B6B6B]">{t("feat3CardSub")}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-1.5">
-                    <span className="px-2.5 py-1 rounded-lg bg-[#EEEBF8] border border-[#8F6FE0] text-xs font-medium text-[#111111]">
-                      {t("feat3Chip1")}
-                    </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-[#EEEBF8] border border-[#8F6FE0] text-xs font-medium text-[#111111]">
-                      {t("feat3Chip2")}
-                    </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-white border border-[#E7E7E4] text-xs text-[#6B6B6B]">
-                      {t("feat3Chip3")}
-                    </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-white border border-[#E7E7E4] text-xs text-[#6B6B6B]">
-                      {t("feat3Chip4")}
-                    </span>
-                  </div>
-
-                  <div className="space-y-2.5 pt-1">
-                    <p className="text-[11px] font-semibold text-[#6B6B6B]">{t("feat3WhoLabel")}</p>
-
-                    {[
-                      {
-                        name: t("feat3Who1Name"),
-                        desc: t("feat3Who1Desc"),
-                        checked: sharePlatform,
-                        toggle: () => setSharePlatform((v) => !v),
-                      },
-                      {
-                        name: t("feat3Who2Name"),
-                        desc: t("feat3Who2Desc"),
-                        checked: shareEmployers,
-                        toggle: () => setShareEmployers((v) => !v),
-                      },
-                      {
-                        name: t("feat3Who3Name"),
-                        desc: t("feat3Who3Desc"),
-                        checked: sharePartner,
-                        toggle: () => setSharePartner((v) => !v),
-                      },
-                    ].map((row, idx) => (
-                      <div key={idx} className="flex items-center justify-between gap-2 text-xs">
-                        <div>
-                          <p className="font-medium text-[#111111]">{row.name}</p>
-                          <p className="text-[11px] text-[#6B6B6B]">{row.desc}</p>
-                        </div>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={row.checked}
-                          aria-label={row.name}
-                          onClick={row.toggle}
-                          className={`w-10 h-6 rounded-full p-0.5 transition-colors shrink-0 ${
-                            row.checked ? "bg-[#6A4FC4]" : "bg-[#D8D8D4]"
-                          }`}
-                        >
-                          <span
-                            className={`block w-5 h-5 rounded-full bg-white transition-transform ${
-                              row.checked ? "translate-x-4" : "translate-x-0"
-                            }`}
-                          />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="pt-2 border-t border-[#E7E7E4] flex items-center gap-1.5 text-[11px] text-[#6B6B6B]">
-                    <ShieldIcon size={13} />
-                    <span>{t("feat3Encrypted")}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-col justify-center p-4 sm:p-8 md:p-12 space-y-3">
-                <p className="text-xs font-semibold text-[#6A4FC4]">{t("feat3Label")}</p>
-                <h3 className="text-[26px] font-semibold tracking-tight leading-snug text-[#111111]">
-                  {t("feat3HeadingLine1")}
-                  <br />
-                  {t("feat3HeadingLine2")}
-                </h3>
-                <p className="text-[15px] text-[#6B6B6B] leading-relaxed">{t("feat3Body")}</p>
-              </div>
-            </div>
-
-            {/* Row 4: Text Left, Tile Right */}
-            <div className="grid grid-cols-1 md:grid-cols-2">
-              <div className="order-2 md:order-1 flex flex-col justify-center p-4 sm:p-8 md:p-12 space-y-3">
-                <p className="text-xs font-semibold text-[#6A4FC4]">{t("feat4Label")}</p>
-                <h3 className="text-[26px] font-semibold tracking-tight leading-snug text-[#111111]">
-                  {t("feat4HeadingLine1")}
-                  <br />
-                  {t("feat4HeadingLine2")}
-                </h3>
-                <p className="text-[15px] text-[#6B6B6B] leading-relaxed">{t("feat4Body")}</p>
-              </div>
-
-              <div className="order-1 md:order-2 bg-[#F5F5F3] rounded-[24px] p-6 sm:p-8 flex flex-col justify-center md:min-h-[440px]">
-                <div className="mezgeb-card p-4 space-y-3">
-                  <div className="flex items-center gap-2 px-3 min-h-[36px] rounded-lg border border-[#E7E7E4] bg-[#FAF9F6] text-xs text-[#6B6B6B]">
-                    <SearchIcon size={14} />
-                    <span>{t("feat4SearchPlaceholder")}</span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                    <span className="px-2 py-1 rounded-md bg-[#E4F2EC] text-[#1F5C46] font-medium">
-                      {t("feat4Filter1")} ✓
-                    </span>
-                    <span className="px-2 py-1 rounded-md bg-[#E4F2EC] text-[#1F5C46] font-medium">
-                      {t("feat4Filter2")} ✓
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-[#6B6B6B] ml-auto">
-                      <LockIcon size={12} />
-                      <span>{t("feat4FilterPrivate")}</span>
-                    </span>
-                  </div>
-
-                  {/* Result 1 expanded */}
-                  <div className="p-3 rounded-xl border border-[#E7E7E4] space-y-2.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <span className="w-8 h-8 rounded-lg bg-[#F5F5F3] text-[#111111] font-semibold text-xs flex items-center justify-center shrink-0">
-                          L
-                        </span>
-                        <div>
-                          <p className="text-xs font-semibold text-[#111111]">{t("feat4Job1Title")}</p>
-                          <p className="text-[11px] text-[#6B6B6B]">{t("feat4Job1Meta")}</p>
-                        </div>
-                      </div>
-                      <span className="px-2 py-0.5 rounded bg-[#E4F2EC] text-[#1F5C46] text-[10px] font-semibold shrink-0">
-                        {t("feat4Job1Match")}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-wrap gap-1.5 text-[10px]">
-                      <span className="px-2 py-0.5 rounded bg-[#E4F2EC] text-[#1F5C46] font-medium">
-                        {t("feat4Job1Tag1")} ✓
-                      </span>
-                      <span className="px-2 py-0.5 rounded bg-[#E4F2EC] text-[#1F5C46] font-medium">
-                        {t("feat4Job1Tag2")} ✓
-                      </span>
-                      <span className="px-2 py-0.5 rounded bg-[#F5F5F3] text-[#6B6B6B]">
-                        {t("feat4Job1Tag3")}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 pt-0.5">
-                      <Link
-                        to="/demo"
-                        className="flex-1 mezgeb-btn-primary min-h-[34px] text-xs px-3"
-                      >
-                        <MicIcon size={13} />
-                        <span>{t("feat4Job1Apply")}</span>
-                      </Link>
-                      <Link
-                        to="/templates"
-                        className="mezgeb-btn-secondary min-h-[34px] text-xs px-3"
-                      >
-                        {t("feat4Job1Save")}
-                      </Link>
-                    </div>
-                  </div>
-
-                  {/* Result 2 collapsed */}
-                  <div className="p-3 rounded-xl border border-[#E7E7E4] flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-8 h-8 rounded-lg bg-[#F5F5F3] text-[#111111] font-semibold text-xs flex items-center justify-center shrink-0">
-                        T
-                      </span>
-                      <div>
-                        <p className="text-xs font-semibold text-[#111111]">{t("feat4Job2Title")}</p>
-                        <p className="text-[11px] text-[#6B6B6B]">{t("feat4Job2Meta")}</p>
-                      </div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded bg-[#F5F5F3] text-[#6B6B6B] text-[10px] font-medium shrink-0">
-                      {t("feat4Job2Match")}
+                  <p className="text-xs text-[var(--error)]">{t("heroVideoYearError")}</p>
+                  <div className="flex justify-end">
+                    <span className="w-12 h-12 rounded-full bg-[var(--accent)] text-white flex items-center justify-center mz-mic-ripple">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                        />
+                      </svg>
                     </span>
                   </div>
                 </div>
+                <aside className="md:col-span-4 rounded-xl border border-[var(--line)] bg-white p-4 text-left text-sm space-y-2 shadow-sm">
+                  <p className="font-semibold text-[var(--ink)]">{t("optAreaKolfe")}</p>
+                  <p className="text-[var(--muted)] leading-snug">{t("heroPartnerNotice")}</p>
+                </aside>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* 4.4 FOR PLATFORMS */}
-      <section aria-labelledby="platforms-heading" className="bg-white py-16 md:py-24 border-t border-[#E7E7E4]">
-        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 md:px-10 space-y-12">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-end">
-            <div className="lg:col-span-7 space-y-3">
-              <p className="text-sm font-semibold text-[#6A4FC4]">{t("platformsLabel")}</p>
-              <h2
-                id="platforms-heading"
-                className="text-3xl sm:text-4xl md:text-[44px] font-bold tracking-[-0.025em] leading-[1.12] text-[#111111]"
-              >
+      <section aria-labelledby="why-heading" className="bg-[var(--mint)] py-20 md:py-32">
+        <div className="mezgeb-container max-w-3xl text-left space-y-6">
+          <p className="text-sm font-semibold text-[var(--accent)] uppercase tracking-wide">{t("whyLabel")}</p>
+          <h2 id="why-heading" className="sr-only">
+            {t("whyLabel")}
+          </h2>
+          <p className="text-2xl md:text-[2.25rem] font-semibold text-[var(--ink)] leading-snug">{t("whyP1")}</p>
+          <p className="text-lg text-[var(--ink-2)] leading-relaxed">
+            {t("whyP2Lead")}
+            <strong>{t("whyP2Bold1")}</strong>
+            {t("whyP2Mid")}
+            <strong>{t("whyP2Bold2")}</strong>
+          </p>
+          <p className="text-lg text-[var(--ink-2)] leading-relaxed">
+            {t("whyP3Lead")}
+            <strong>{t("whyP3Bold")}</strong>
+            {t("whyP3Tail")}
+          </p>
+          <p className="text-xl font-medium text-[var(--ink)]">{t("whyP4")}</p>
+          <p className="text-sm text-[var(--muted)]">{t("whySources")}</p>
+        </div>
+      </section>
+
+      <section aria-labelledby="features-heading" className="bg-[var(--paper)] py-20 md:py-28">
+        <div className="mezgeb-container space-y-20">
+          <div className="text-left space-y-2">
+            <p className="text-xs font-mono uppercase tracking-wider text-[var(--accent)] font-semibold">
+              {t("featuresSectionTitle")}
+            </p>
+            <h2 id="features-heading" className="text-3xl md:text-4xl font-semibold text-[var(--ink)]">
+              Designed for every way people sign up
+            </h2>
+          </div>
+
+          <FeatureRow
+            label={t("feat1Label")}
+            title={[t("feat1HeadingLine1"), t("feat1HeadingLine2")]}
+            body={t("feat1Body")}
+            reverse={false}
+            visual={
+              <div className="rounded-2xl border border-[var(--line)] bg-[var(--paper)] p-5 space-y-3 max-w-md shadow-sm">
+                <p className="text-xs text-[var(--muted)]">{t("feat1SmsSender")}</p>
+                <p className="text-sm">{t("feat1SmsText")}</p>
+                <p className="text-sm font-mono text-[var(--accent)]">{t("feat1SmsLink")}</p>
+                <div className="pt-3 border-t border-[var(--line)]">
+                  <p className="font-semibold">{t("feat1ResumeTitle")}</p>
+                  <p className="text-xs text-[var(--muted)]">{t("feat1ResumeSub")}</p>
+                  <Button variant="primary" size="sm" className="mt-3" tabIndex={-1}>
+                    {t("feat1ResumeBtn")}
+                  </Button>
+                </div>
+              </div>
+            }
+          />
+
+          <FeatureRow
+            label={t("feat2Label")}
+            title={[t("feat2HeadingLine1"), t("feat2HeadingLine2")]}
+            body={t("feat2Body")}
+            reverse
+            visual={
+              <div className="rounded-2xl border border-[var(--line)] bg-[var(--paper)] p-5 max-w-md shadow-sm space-y-3">
+                <p className="font-semibold">{t("feat2CardTitle")}</p>
+                <p className="text-xs text-[var(--muted)] p-2 rounded-lg bg-[var(--stone)] border border-[var(--line)]">
+                  &quot;{t("feat2TranscriptHl1")}…&quot;
+                </p>
+                <p className="text-xs font-semibold text-[var(--muted)]">{t("feat2SkillsLabel")}</p>
+                <div className="flex flex-wrap gap-1">
+                  {[t("feat2Skill1"), t("feat2Skill2"), t("feat2Skill3")].map((s) => (
+                    <span key={s} className="text-[10px] px-2 py-0.5 rounded bg-[var(--mint)] text-[var(--mint-ink)] font-mono">
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            }
+          />
+
+          <FeatureRow
+            label={t("feat3Label")}
+            title={[t("feat3HeadingLine1"), t("feat3HeadingLine2")]}
+            body={t("feat3Body")}
+            reverse={false}
+            visual={
+              <div className="rounded-2xl border border-[var(--line)] bg-[var(--paper)] p-5 max-w-md shadow-sm space-y-3">
+                <p className="font-semibold">{t("feat3CardTitle")}</p>
+                <p className="text-xs text-[var(--muted)]">{t("feat3CardSub")}</p>
+                <div className="flex flex-wrap gap-1">
+                  {[t("feat3Chip1"), t("feat3Chip2"), t("feat3Chip3")].map((c) => (
+                    <span key={c} className="text-xs px-2 py-1 rounded-full border border-[var(--line)]">
+                      {c}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-[11px] text-[var(--muted)]">{t("feat3Encrypted")}</p>
+              </div>
+            }
+          />
+
+          <FeatureRow
+            label={t("feat4Label")}
+            title={[t("feat4HeadingLine1"), t("feat4HeadingLine2")]}
+            body={t("feat4Body")}
+            reverse
+            visual={
+              <div className="rounded-2xl border border-[var(--line)] bg-[var(--paper)] p-5 max-w-md shadow-sm space-y-2">
+                <Field
+                  id="feat4-search"
+                  label={t("feat4SearchPlaceholder")}
+                  inputProps={{ readOnly: true, value: "", placeholder: t("feat4SearchPlaceholder"), tabIndex: -1 }}
+                />
+                <p className="text-sm font-semibold">{t("feat4Job1Title")}</p>
+                <p className="text-xs text-[var(--muted)]">{t("feat4Job1Meta")}</p>
+                <p className="text-xs text-[var(--mint-ink)] font-medium">{t("feat4Job1Match")}</p>
+              </div>
+            }
+          />
+        </div>
+      </section>
+
+      <section id="platforms" aria-labelledby="platforms-heading" className="bg-[var(--paper)] border-t border-[var(--line)] py-20 md:py-28">
+        <div className="mezgeb-container space-y-14">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+            <div>
+              <p className="text-xs font-mono uppercase text-[var(--accent)] font-semibold mb-2">{t("platformsLabel")}</p>
+              <h2 id="platforms-heading" className="text-3xl md:text-[2.75rem] font-semibold text-[var(--ink)] leading-tight">
                 {t("platformsHeadingLine1")}
                 <br />
                 {t("platformsHeadingLine2")}
               </h2>
             </div>
-            <p className="lg:col-span-5 text-base text-[#6B6B6B] leading-relaxed">
-              {t("platformsIntro")}
-            </p>
+            <p className="text-lg text-[var(--muted)] leading-relaxed max-w-xl">{t("platformsIntro")}</p>
           </div>
 
-          {/* 3 step tiles */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Step 1: Add one tag */}
-            <div className="bg-[#F5F5F3] rounded-[20px] p-6 flex flex-col justify-between gap-5">
-              <div className="flex items-center gap-3">
-                <span className="w-7 h-7 rounded-full bg-[#111111] text-white text-xs font-bold inline-flex items-center justify-center shrink-0">
-                  1
-                </span>
-                <h3 className="text-base font-semibold text-[#111111]">{t("platStep1Title")}</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <PlatformTile title={t("platStep1Title")}>
+              <CodeBlock
+                filename="signup.html"
+                code={embedCode}
+                copyLabel={t("copyCodeBtn")}
+                copiedLabel={t("copiedButton")}
+                copiedAnnouncement={t("copiedAnnouncement")}
+              />
+            </PlatformTile>
+            <PlatformTile title={t("platStep2Title")}>
+              <div className="rounded-xl border border-[var(--line)] p-4 bg-[var(--stone)] text-left space-y-2">
+                <p className="text-xs text-[var(--muted)]">{t("platStep2Org")}</p>
+                <p className="text-xs font-mono text-[var(--accent)]">{t("platStep2Step")}</p>
+                <p className="font-semibold text-[var(--ink)]">{t("platStep2Q")}</p>
+                <VoiceButton
+                  state="idle"
+                  onStart={() => {}}
+                  onStop={() => {}}
+                  labels={{ speakLabel: t("platStep2OptSpeak") }}
+                />
               </div>
+            </PlatformTile>
+            <PlatformTile title={t("platStep3Title")}>
+              <CodeBlock
+                filename="webhook.json"
+                code={webhookCode}
+                copyLabel={t("copyCodeBtn")}
+                copiedLabel={t("copiedButton")}
+                copiedAnnouncement={t("copiedAnnouncement")}
+              />
+              <p className="text-xs text-[var(--muted)] mt-2">{t("platStep3Note")}</p>
+            </PlatformTile>
+          </div>
 
-              <div className="rounded-xl bg-[#161616] text-white overflow-hidden">
-                <div className="px-4 py-2.5 border-b border-white/10 flex items-center justify-between text-xs text-[#9B9B9B]">
-                  <span className="font-mono">signup.html</span>
-                  <button
-                    type="button"
-                    onClick={handleCopySnippet}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/10 text-white hover:bg-white/20 text-xs font-medium"
-                  >
-                    <CopyIcon size={12} />
-                    <span>{codeCopied ? t("copiedButton") : t("copyButton")}</span>
-                  </button>
-                </div>
-                <pre className="p-4 text-xs font-mono leading-relaxed overflow-x-auto text-[#E4F2EC]">
-                  <code>{snippetCode}</code>
-                </pre>
-              </div>
-            </div>
-
-            {/* Step 2: Learners sign up their way */}
-            <div className="bg-[#F5F5F3] rounded-[20px] p-6 flex flex-col justify-between gap-5">
-              <div className="flex items-center gap-3">
-                <span className="w-7 h-7 rounded-full bg-[#111111] text-white text-xs font-bold inline-flex items-center justify-center shrink-0">
-                  2
-                </span>
-                <h3 className="text-base font-semibold text-[#111111]">{t("platStep2Title")}</h3>
-              </div>
-
-              <div className="mezgeb-card p-4 space-y-3 text-xs">
-                <div className="flex items-center justify-between text-[#6B6B6B]">
-                  <span>{t("platStep2Org")}</span>
-                  <span>{t("platStep2Step")}</span>
-                </div>
-
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-[#111111]">{t("platStep2Q")}</p>
-                  <span className="inline-flex items-center gap-1 text-[11px] text-[#6A4FC4] font-medium shrink-0">
-                    <VolumeIcon size={13} />
-                    <span>{t("platStep2ReadAloud")}</span>
-                  </span>
-                </div>
-
-                <div className="px-3 py-2 rounded-lg border border-[#E7E7E4] font-mono text-sm text-[#111111]">
-                  09•• ••• 214
-                </div>
-
-                <div className="grid grid-cols-3 gap-1.5">
-                  <span className="text-center py-1.5 rounded-md bg-[#EEEBF8] border border-[#8F6FE0] font-semibold text-[#111111]">
-                    {t("platStep2OptType")}
-                  </span>
-                  <span className="text-center py-1.5 rounded-md border border-[#E7E7E4] text-[#6B6B6B]">
-                    {t("platStep2OptSpeak")}
-                  </span>
-                  <span className="text-center py-1.5 rounded-md border border-[#E7E7E4] text-[#6B6B6B]">
-                    {t("platStep2OptHelp")}
-                  </span>
-                </div>
-
-                <Link to="/demo" className="w-full mezgeb-btn-primary min-h-[36px] text-xs">
-                  {t("heroContinue")}
+          <div className="rounded-2xl border border-[var(--line)] p-6 md:p-8 grid grid-cols-1 md:grid-cols-3 gap-6 bg-[var(--stone)]">
+            {[
+              { title: t("platLevel1Title"), desc: t("platLevel1Desc"), link: t("platLevel1Link"), to: "/docs/quick-start" },
+              { title: t("platLevel2Title"), desc: t("platLevel2Desc"), link: t("platLevel2Link"), to: "/docs/api" },
+              { title: t("platLevel3Title"), desc: t("platLevel3Desc"), link: t("platLevel3Link"), to: "/employers/accommodations" },
+            ].map((lvl) => (
+              <div key={lvl.title} className="space-y-2">
+                <h3 className="font-semibold text-[var(--ink)]">{lvl.title}</h3>
+                <p className="text-sm text-[var(--muted)]">{lvl.desc}</p>
+                <Link to={lvl.to} className="text-sm font-medium text-[var(--accent)] underline underline-offset-4">
+                  {lvl.link}
                 </Link>
               </div>
-            </div>
-
-            {/* Step 3: Get a confirmed profile */}
-            <div className="bg-[#F5F5F3] rounded-[20px] p-6 flex flex-col justify-between gap-5">
-              <div className="flex items-center gap-3">
-                <span className="w-7 h-7 rounded-full bg-[#111111] text-white text-xs font-bold inline-flex items-center justify-center shrink-0">
-                  3
-                </span>
-                <h3 className="text-base font-semibold text-[#111111]">{t("platStep3Title")}</h3>
-              </div>
-
-              <div className="space-y-2.5">
-                <p className="text-xs font-mono text-[#6B6B6B]">{t("platStep3Event")}</p>
-                <div className="mezgeb-card p-4 space-y-2.5">
-                  <div className="flex items-center justify-between gap-2 text-xs font-mono">
-                    <span className="text-[#111111] truncate">POST /v1/registrations/exchange</span>
-                    <span className="px-2 py-0.5 rounded bg-[#E4F2EC] text-[#1F5C46] font-bold">
-                      200
-                    </span>
-                  </div>
-                  <pre className="text-[11px] font-mono leading-relaxed text-[#111111] bg-[#F5F5F3] p-3 rounded-lg overflow-x-auto">
-                    <code>{`{
-  "name": "Hana",
-  "area": "Lideta, Addis Ababa",
-  "id_route": "partner_verified",
-  "skills": ["Sales", "Bookkeeping"],
-  "support_shared": false
-}`}</code>
-                  </pre>
-                  <p className="text-[11px] text-[#6B6B6B]">{t("platStep3Note")}</p>
-                </div>
-              </div>
-            </div>
+            ))}
           </div>
 
-          {/* Integration levels card */}
-          <div className="mezgeb-card p-6 md:p-8 grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="space-y-2">
-              <h3 className="text-base font-semibold text-[#111111]">{t("platLevel1Title")}</h3>
-              <p className="text-sm text-[#6B6B6B]">{t("platLevel1Desc")}</p>
-              <Link
-                to="/docs/quick-start"
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-[#6A4FC4] hover:underline pt-1"
-              >
-                <span>{t("platLevel1Link")}</span>
-                <ArrowRightIcon size={14} />
-              </Link>
-            </div>
-            <div className="space-y-2 md:border-l md:border-[#E7E7E4] md:pl-8">
-              <h3 className="text-base font-semibold text-[#111111]">{t("platLevel2Title")}</h3>
-              <p className="text-sm text-[#6B6B6B]">{t("platLevel2Desc")}</p>
-              <Link
-                to="/docs/api"
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-[#6A4FC4] hover:underline pt-1"
-              >
-                <span>{t("platLevel2Link")}</span>
-                <ArrowRightIcon size={14} />
-              </Link>
-            </div>
-            <div className="space-y-2 md:border-l md:border-[#E7E7E4] md:pl-8">
-              <h3 className="text-base font-semibold text-[#111111]">{t("platLevel3Title")}</h3>
-              <p className="text-sm text-[#6B6B6B]">{t("platLevel3Desc")}</p>
-              <Link
-                to="/docs/jobposting"
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-[#6A4FC4] hover:underline pt-1"
-              >
-                <span>{t("platLevel3Link")}</span>
-                <ArrowRightIcon size={14} />
-              </Link>
-            </div>
-          </div>
-
-          {/* Hosting line + playground CTA */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2">
-            <p className="text-sm text-[#6B6B6B]">{t("platHostingLine")}</p>
-            <Link to="/playground" className="mezgeb-btn-primary shrink-0">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <p className="text-sm text-[var(--muted)]">{t("platHostingLine")}</p>
+            <Link
+              to="/playground"
+              className="inline-flex items-center justify-center min-h-[44px] px-5 rounded-lg bg-[var(--accent)] text-white font-medium text-sm hover:bg-[var(--accent-hover)]"
+            >
               {t("platHostingBtn")}
             </Link>
           </div>
         </div>
       </section>
-
-      <AccessibleDialog
-        open={transcriptOpen}
-        onClose={() => setTranscriptOpen(false)}
-        title={t("heroVideoTranscriptTitle")}
-      >
-        <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-[#111111]">
-          {t("heroVideoTranscriptBody")}
-        </pre>
-      </AccessibleDialog>
     </Layout>
+  );
+}
+
+function FeatureRow({
+  label,
+  title,
+  body,
+  visual,
+  reverse,
+}: {
+  label: string;
+  title: [string, string];
+  body: string;
+  visual: React.ReactNode;
+  reverse?: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+      <div className={`lg:col-span-5 space-y-4 text-left ${reverse ? "lg:order-2" : ""}`}>
+        <p className="text-xs font-mono uppercase text-[var(--accent)] font-semibold">{label}</p>
+        <h3 className="text-2xl md:text-3xl font-semibold text-[var(--ink)]">
+          {title[0]}
+          <br />
+          {title[1]}
+        </h3>
+        <p className="text-base text-[var(--muted)] leading-relaxed max-w-md">{body}</p>
+      </div>
+      <div className={`lg:col-span-7 ${reverse ? "lg:order-1" : ""}`}>
+        <div className="h-[440px] rounded-2xl bg-[var(--stone)] flex items-center justify-center p-8 overflow-hidden">
+          {visual}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlatformTile({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-3">
+      <h3 className="font-semibold text-[var(--ink)]">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function HeroWaveform() {
+  return (
+    <div
+      aria-hidden="true"
+      className="absolute left-0 right-0 top-16 sm:top-20 md:top-24 h-40 flex items-center justify-between pointer-events-none select-none px-2 z-0 overflow-hidden opacity-90"
+    >
+      <WaveWing wing={WAVE_LEFT} justify="start" />
+      <WaveWing wing={WAVE_CENTER} justify="center" />
+      <WaveWing wing={WAVE_RIGHT} justify="end" />
+    </div>
+  );
+}
+
+function WaveWing({ wing, justify }: { wing: number[]; justify: "start" | "center" | "end" }) {
+  const justifyClass =
+    justify === "start" ? "justify-start flex-1" : justify === "end" ? "justify-end flex-1" : "px-8";
+  return (
+    <div className={`flex items-center h-full space-x-[3px] ${justifyClass}`}>
+      {wing.map((h, i) => (
+        <span key={i} className="mz-waveform-bar" style={{ height: h }} />
+      ))}
+    </div>
   );
 }

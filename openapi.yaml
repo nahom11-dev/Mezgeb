@@ -1,0 +1,277 @@
+openapi: 3.1.0
+info:
+  title: Mezgeb API
+  version: 0.1.0
+  summary: Accessible sign-up for training programmes, job boards and NGOs.
+  description: |
+    Level 1 (script tag) uses `/v1/mezgeb.js`, `/v1/registrations` and `/v1/registrations/exchange`.
+    Level 2 (build your own UI) can also call the AI helpers under `/api/ai/*`; every one of them
+    has a no-AI fallback in the widget, and `/api/capabilities` says which are switched on.
+
+    **Keys.** Publishable keys (`pk_…`) go in the page. Secret keys (`sk_…`) stay on the platform's
+    server and are only sent to `/v1/registrations/exchange`. Configure pairs with
+    `MEZGEB_SITE_KEYS="pk_…:sk_…"`. Browser origins allowed to call the API: `MEZGEB_ALLOWED_ORIGINS`.
+servers:
+  - url: http://localhost:3000
+    description: Local (npm run dev)
+tags:
+  - name: Platform handoff
+  - name: Embed
+  - name: AI helpers
+paths:
+  /v1/mezgeb.js:
+    get:
+      tags: [Embed]
+      summary: The <mezgeb-register> web component (build with `npm run build:embed`)
+      responses:
+        "200":
+          description: JavaScript module
+          content:
+            application/javascript: {}
+        "404":
+          description: Embed not built yet
+  /v1/registrations:
+    post:
+      tags: [Platform handoff]
+      summary: Store a confirmed profile and get a one-time token (called by the widget)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [siteKey, profile]
+              properties:
+                siteKey: { type: string, example: pk_test_savanna }
+                profile: { $ref: "#/components/schemas/Profile" }
+      responses:
+        "201":
+          description: Token created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string, example: mzg_tok_q3Vb9w0V0pZb2Jm1e3KcX5Yt8a1N2s7L }
+                  expiresAt: { type: integer, description: Unix time in ms }
+        "400": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /v1/registrations/exchange:
+    post:
+      tags: [Platform handoff]
+      summary: Swap a one-time token for the confirmed profile (platform server only)
+      description: Single use. Expires after `MEZGEB_TOKEN_TTL_MS` (default 5 minutes). A wrong key does not use up the token.
+      security:
+        - secretKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+      responses:
+        "200":
+          description: The confirmed profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profile: { $ref: "#/components/schemas/Profile" }
+                  siteKey: { type: string }
+                  createdAt: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/Error" }
+        "401":
+          description: Missing or wrong secret key
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "404":
+          description: Unknown or already used token
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "410":
+          description: Token expired
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /api/registrations/outbox:
+    post:
+      tags: [Platform handoff]
+      summary: Flush a sign-up that was queued while offline (called by the widget)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id: { type: string }
+                siteKey: { type: string }
+                profile: { $ref: "#/components/schemas/Profile" }
+      responses:
+        "200":
+          description: Token created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  outboxId: { type: string }
+                  token: { type: string }
+                  expiresAt: { type: integer }
+  /api/health:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  aiConfigured: { type: boolean }
+                  speech:
+                    type: object
+                    description: "Who transcribes voice answers, per interface language"
+                    properties:
+                      am: { type: string, enum: [addis, elevenlabs, gemini, "off"] }
+                      en: { type: string, enum: [addis, elevenlabs, gemini, "off"] }
+                  readAloud:
+                    type: object
+                    description: "Who reads text aloud, per language (browser means the device's own voice)"
+                    properties:
+                      am: { type: string, enum: [addis, browser] }
+                      en: { type: string, enum: [elevenlabs, browser] }
+  /api/capabilities:
+    get:
+      tags: [AI helpers]
+      summary: Which AI helpers are on (all false when AI is off)
+      responses:
+        "200":
+          description: Capabilities
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  voice: { type: boolean }
+                  voiceProvider:
+                    type: [string, "null"]
+                    enum: [addis, elevenlabs, gemini, null]
+                    description: "Provider for ?lang= (default am); null when voice is off. Prefer voiceProviders."
+                  voiceProviders:
+                    type: object
+                    properties:
+                      am: { type: [string, "null"], enum: [addis, elevenlabs, gemini, null] }
+                      en: { type: [string, "null"], enum: [addis, elevenlabs, gemini, null] }
+                  readAloudProviders:
+                    type: object
+                    description: "Server read-aloud per language; null means the widget uses the browser voice"
+                    properties:
+                      am: { type: [string, "null"], enum: [addis, null] }
+                      en: { type: [string, "null"], enum: [elevenlabs, null] }
+                  smartHelp: { type: boolean }
+                  skillsAi: { type: boolean }
+                  simplifyAi: { type: boolean }
+  /api/tts:
+    post:
+      tags: [AI helpers]
+      summary: Read template text aloud (Amharic via Addis AI, English via ElevenLabs)
+      description: >-
+        For question labels, hints, error messages and help text only, never learner answers.
+        Each sentence is generated once per server run and then served from memory.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 600 }
+                lang: { type: string, enum: [am, en] }
+      responses:
+        "200":
+          description: The spoken text as MP3
+          content:
+            audio/mpeg: { schema: { type: string, format: binary } }
+        "400": { description: Missing text }
+        "413": { description: Text longer than 600 characters }
+        "503": { description: No read-aloud service for this language, or the service is busy or out of credit }
+  /api/ai/voice:
+    post:
+      tags: [AI helpers]
+      summary: Transcribe a short spoken answer (audio is not stored)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [audioBase64]
+              properties:
+                audioBase64: { type: string, description: "≤ ~1 MB" }
+                mimeType: { type: string, example: audio/wav }
+                questionLabel: { type: string }
+                expectedType: { type: string, example: phone }
+                lang: { type: string, enum: [am, en] }
+                options:
+                  type: array
+                  items: { type: object, properties: { value: { type: string }, label: { type: string } } }
+      responses:
+        "200":
+          description: Transcript for the learner to confirm before saving
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transcript: { type: string }
+                  value: { type: string }
+                  confidence: { type: string, enum: [high, medium, low] }
+                  matchedValue: { type: [string, "null"] }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/ai/help:
+    post:
+      tags: [AI helpers]
+      summary: Plain-language help from the screen structure (never the learner's answers)
+      responses: { "200": { description: "{ explanation, targetFieldId }" }, "503": { $ref: "#/components/responses/Error" } }
+  /api/ai/simplify:
+    post:
+      tags: [AI helpers]
+      summary: Rewrite a question in simpler words
+      responses: { "200": { description: "{ simplified }" }, "503": { $ref: "#/components/responses/Error" } }
+  /api/ai/skills:
+    post:
+      tags: [AI helpers]
+      summary: Suggest skills from the learner's work story (only when the learner asks)
+      responses: { "200": { description: "{ skills: [{ name, evidence }] }" }, "503": { $ref: "#/components/responses/Error" } }
+components:
+  securitySchemes:
+    secretKey:
+      type: http
+      scheme: bearer
+      description: The platform's secret key (sk_…)
+  schemas:
+    Profile:
+      type: object
+      description: Fields depend on the template's `maps_to` values. Support needs appear only if the learner chose to share them.
+      additionalProperties: true
+      example:
+        preferred_language: am
+        name: Hana Tesfaye
+        area: Lideta
+        phone: "0911223344"
+        date_of_birth: "1997-09-22"
+        id_route: refugee_id
+        skills: [Sales, Bookkeeping]
+        support_shared: false
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

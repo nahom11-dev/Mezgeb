@@ -1,101 +1,39 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { AccessibleDialog } from "../components/AccessibleDialog";
-import {
-  ClockIcon,
-  DownloadIcon,
-  GlobeIcon,
-  LockIcon,
-  MoreHorizontalIcon,
-  QuestionIcon,
-  ShieldIcon,
-} from "../components/Icons";
-import { useLiveAnnouncer } from "../components/LiveAnnouncer";
-import { MezgebWidget } from "../components/MezgebWidget";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { FileJson, MoreHorizontal, Plus, Search } from "lucide-react";
 import { Layout } from "../components/Layout";
-import { Lang, useI18n } from "../i18n";
-import { safeSetSession } from "../lib/storage";
-import { getEffectiveSettings, TEMPLATES } from "../templates";
+import { TranslationKeys, useI18n } from "../i18n";
+import { TEMPLATES } from "../templates";
 import {
   deleteFromMyTemplates,
   duplicateMyTemplate,
   loadMyTemplates,
   renameMyTemplate,
 } from "../templates/storage";
-import { IdRoute, MezgebTemplate, TemplateCategory } from "../templates/types";
+import { MezgebTemplate, TemplateCategory } from "../templates/types";
+import { getEffectiveSettings } from "../templates";
 import { validateTemplate } from "../templates/validate";
+import { Button, Dialog, Field } from "../ui";
+import { ImportTemplateDialog } from "./templates/ImportTemplateDialog";
+import {
+  estimateMinutes,
+  menuItemClass,
+  menuItemDangerClass,
+  menuSurfaceClass,
+  TemplateMark,
+} from "./templates/kit";
+import { useTs } from "./templates/strings";
 
-type FilterChip = "all" | "learning" | "jobs" | "employer" | "ngo" | "mine";
+type Filter = "all" | "learning" | "jobs" | "employer" | "ngo" | "mine";
+type SortKey = "updated" | "steps" | "az";
 
-const FIELD_PLAIN_WORDS: Record<string, { en: string; am: string }> = {
-  preferred_language: { en: "language", am: "ቋንቋ" },
-  name: { en: "name", am: "ስም" },
-  area: { en: "area", am: "አካባቢ" },
-  region: { en: "region", am: "ክልል" },
-  phone: { en: "phone", am: "ስልክ" },
-  date_of_birth: { en: "date of birth", am: "የትውልድ ቀን" },
-  id_route: { en: "ID option", am: "የመታወቂያ አማራጭ" },
-  support_needs: { en: "support needs", am: "የድጋፍ ፍላጎት" },
-  skills: { en: "work story & skills", am: "የስራ ታሪክና ክህሎት" },
-  job_goal: { en: "job goal", am: "የሚፈልጉት ስራ" },
-  job_title: { en: "job title", am: "የስራ መደብ" },
-  company_name: { en: "company name", am: "የኩባንያ ስም" },
-  job_location: { en: "job location", am: "የስራ ቦታ" },
-  contact_person: { en: "hiring contact", am: "ተጠሪ ሰው" },
-  offered_accommodations: { en: "workplace support", am: "የስራ ቦታ ድጋፍ" },
-  email: { en: "email", am: "ኢሜይል" },
-  education_level: { en: "education level", am: "የትምህርት ደረጃ" },
-  training_centre: { en: "training centre", am: "የስልጠና ማዕከል" },
-  emergency_phone: { en: "emergency phone", am: "የድንገተኛ ስልክ" },
-  referral_source: { en: "how they heard", am: "መረጃ ምንጭ" },
+const CATEGORY_KEYS: Record<TemplateCategory, TranslationKeys> = {
+  learning: "catLearning",
+  jobs: "catJobs",
+  employer: "catEmployer",
+  ngo: "catNgo",
+  custom: "catCustom",
 };
-
-function estimateMinutes(tpl: MezgebTemplate): number {
-  const inputCount = tpl.questions.filter((q) => q.type !== "info").length;
-  return Math.max(1, Math.ceil((inputCount * 20) / 60));
-}
-
-function getIdRouteLabel(route: IdRoute, t: (k: any) => string): string {
-  switch (route) {
-    case "fayda":
-      return t("idRouteFayda");
-    case "refugee_id":
-      return t("idRouteRefugee");
-    case "other_document":
-      return t("idRouteOther");
-    case "partner_refer":
-      return t("idRoutePartner");
-  }
-}
-
-function getCategoryLabel(cat: TemplateCategory | undefined, t: (k: any) => string): string {
-  switch (cat) {
-    case "learning":
-      return t("catLearning");
-    case "jobs":
-      return t("catJobs");
-    case "employer":
-      return t("catEmployer");
-    case "ngo":
-      return t("catNgo");
-    default:
-      return t("catCustom");
-  }
-}
-
-function formatCollectsList(tpl: MezgebTemplate, lang: Lang): string {
-  const seen = new Set<string>();
-  const words: string[] = [];
-  for (const q of tpl.questions) {
-    if (q.type === "info" || !q.maps_to || q.maps_to.startsWith("custom_")) continue;
-    if (seen.has(q.maps_to)) continue;
-    seen.add(q.maps_to);
-    const entry = FIELD_PLAIN_WORDS[q.maps_to];
-    const word = entry ? entry[lang] : q.maps_to.replace(/_/g, " ");
-    words.push(words.length === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word);
-  }
-  return words.join(", ");
-}
 
 function downloadJsonFile(tpl: MezgebTemplate) {
   const blob = new Blob([JSON.stringify(tpl, null, 2)], { type: "application/json" });
@@ -109,147 +47,155 @@ function downloadJsonFile(tpl: MezgebTemplate) {
   URL.revokeObjectURL(url);
 }
 
-function MiniPhonePreview({ tpl, lang }: { tpl: MezgebTemplate; lang: Lang }) {
-  const firstQ =
-    tpl.questions.find((q) => q.id !== "language" && q.type !== "info") ?? tpl.questions[0];
-  const platformName = tpl.theme?.platformName || "Learnhub";
-  const accent = tpl.theme?.accent || "#6A4FC4";
-  const firstOpts = firstQ?.options?.slice(0, 2) ?? [];
-
-  return (
-    <div
-      aria-hidden="true"
-      className="w-[146px] shrink-0 rounded-[16px] border-2 border-[#161616] bg-white p-2.5 shadow-xs select-none"
-    >
-      <div className="flex items-center justify-between text-[9px] text-[#6B6B6B] mb-1.5">
-        <span className="font-semibold text-[#111111] truncate max-w-[74px]">{platformName}</span>
-        <span>1 / {tpl.questions.length}</span>
-      </div>
-      <div className="w-full h-1 bg-[#E7E7E4] rounded-full overflow-hidden mb-2">
-        <div className="h-full w-1/3" style={{ backgroundColor: accent }} />
-      </div>
-      <p className="text-[10px] font-semibold text-[#111111] leading-snug line-clamp-2 mb-2">
-        {firstQ ? firstQ.label[lang] : tpl.name[lang]}
-      </p>
-      {firstOpts.length > 0 ? (
-        <div className="space-y-1">
-          {firstOpts.map((opt) => (
-            <div
-              key={opt.value}
-              className="px-1.5 py-1 rounded border border-[#E7E7E4] bg-[#F5F5F3] text-[9px] text-[#111111] truncate"
-            >
-              {opt.label[lang]}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="h-6 rounded border border-[#E7E7E4] bg-[#FAF9F6] px-1.5 flex items-center text-[9px] text-[#6B6B6B]">
-          {firstQ?.type === "phone" ? "091 234 5678" : "…"}
-        </div>
-      )}
-    </div>
-  );
+interface Entry {
+  tpl: MezgebTemplate;
+  isCustom: boolean;
 }
 
 export function TemplatesPage() {
-  const { lang, setLang, t } = useI18n();
-  const { announce } = useLiveAnnouncer();
+  const { lang, t } = useI18n();
+  const s = useTs();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [myTemplates, setMyTemplates] = useState<MezgebTemplate[]>(() => loadMyTemplates().templates);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeFilter, setActiveFilter] = useState<FilterChip>("all");
-  const [compareOpen, setCompareOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [sort, setSort] = useState<SortKey>("updated");
 
-  // Card action menu + dialogs
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
+
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<MezgebTemplate | null>(null);
   const [renameEn, setRenameEn] = useState("");
   const [renameAm, setRenameAm] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<MezgebTemplate | null>(null);
 
-  // Upgraded Preview dialog
-  const [previewTemplate, setPreviewTemplate] = useState<MezgebTemplate | null>(null);
-  const [previewTab, setPreviewTab] = useState<"preview" | "questions" | "json">("preview");
-  const [previewDevice, setPreviewDevice] = useState<"phone" | "desktop">("phone");
-  const [previewJumpId, setPreviewJumpId] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState<string[]>([]);
+  // Deep link: /templates?preview=<id>
+  useEffect(() => {
+    const id = searchParams.get("preview");
+    if (!id) return;
+    const builtIn = TEMPLATES.find((x) => x.id === id);
+    const mine = myTemplates.find((x) => x.id === id);
+    const tpl = builtIn ?? mine;
+    if (tpl) {
+      navigate(`/templates/${encodeURIComponent(id)}`, { replace: true });
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
+  // Close card menus on outside click / Escape
   useEffect(() => {
     if (!openMenuId) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpenMenuId(null);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpenMenuId(null);
+    const onClick = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest("[data-card-menu]")) setOpenMenuId(null);
     };
-    const onClick = () => setOpenMenuId(null);
     window.addEventListener("keydown", onKey);
-    window.addEventListener("click", onClick);
+    document.addEventListener("mousedown", onClick);
     return () => {
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("click", onClick);
+      document.removeEventListener("mousedown", onClick);
     };
   }, [openMenuId]);
 
-  const combinedTemplates = useMemo(() => {
-    const builtIn = TEMPLATES.map((tpl) => ({ tpl, isCustom: false }));
-    const custom = myTemplates.map((tpl) => ({ tpl, isCustom: true }));
-    return [...custom, ...builtIn];
-  }, [myTemplates]);
+  const entries: Entry[] = useMemo(
+    () => [
+      ...myTemplates.map((tpl) => ({ tpl, isCustom: true })),
+      ...TEMPLATES.map((tpl) => ({ tpl, isCustom: false })),
+    ],
+    [myTemplates]
+  );
 
-  const filteredTemplates = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return combinedTemplates.filter(({ tpl, isCustom }) => {
-      if (activeFilter === "mine" && !isCustom) return false;
-      if (
-        activeFilter !== "all" &&
-        activeFilter !== "mine" &&
-        tpl.category !== activeFilter
-      ) {
-        return false;
-      }
+  const counts = useMemo(() => {
+    const c: Record<Filter, number> = { all: entries.length, learning: 0, jobs: 0, employer: 0, ngo: 0, mine: myTemplates.length };
+    for (const { tpl } of entries) {
+      if (tpl.category && tpl.category in c) c[tpl.category as Filter] += 1;
+    }
+    return c;
+  }, [entries, myTemplates.length]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = entries.filter(({ tpl, isCustom }) => {
+      if (filter === "mine" && !isCustom) return false;
+      if (filter !== "all" && filter !== "mine" && tpl.category !== filter) return false;
       if (!q) return true;
-      const haystack = [
+      return [
         tpl.name.en,
         tpl.name.am,
+        tpl.bestFor?.en,
+        tpl.bestFor?.am,
         tpl.description.en,
         tpl.description.am,
-        tpl.bestFor?.en ?? "",
-        tpl.bestFor?.am ?? "",
-        ...tpl.questions.map((item) => `${item.label.en} ${item.label.am}`),
+        ...tpl.questions.map((x) => `${x.label.en} ${x.label.am}`),
       ]
         .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
+        .toLowerCase()
+        .includes(q);
     });
-  }, [combinedTemplates, activeFilter, searchQuery]);
+    const sorted = [...filtered];
+    sorted.sort((a, b) => {
+      if (sort === "steps") {
+        const sa = a.tpl.questions.filter((x) => x.type !== "info").length;
+        const sb = b.tpl.questions.filter((x) => x.type !== "info").length;
+        return sa - sb;
+      }
+      if (sort === "az") {
+        return a.tpl.name.en.localeCompare(b.tpl.name.en);
+      }
+      const da = a.tpl.updatedAt ?? "";
+      const db = b.tpl.updatedAt ?? "";
+      return db.localeCompare(da);
+    });
+    return sorted;
+  }, [entries, filter, query, sort]);
 
-  const handleUseInPlayground = (tpl: MezgebTemplate) => {
-    const validated = validateTemplate(tpl);
-    if (!validated.valid) {
-      setPreviewError(validated.errors);
-      setPreviewTemplate(tpl);
-      setPreviewTab("questions");
-      return;
+  /* ───── actions ───── */
+
+  const copyToBuilder = (tpl: MezgebTemplate) => {
+    const copy: MezgebTemplate = {
+      ...structuredClone(tpl),
+      id: `${tpl.id}-copy-${Date.now().toString(36).slice(-4)}`,
+      category: tpl.category ?? "custom",
+      tested: false,
+      updatedAt: new Date().toISOString(),
+    };
+    navigate(`/templates/${encodeURIComponent(copy.id)}/edit`, { state: { template: copy } });
+  };
+
+  const editInBuilder = (tpl: MezgebTemplate) => {
+    navigate(`/templates/${encodeURIComponent(tpl.id)}/edit`, { state: { template: structuredClone(tpl) } });
+  };
+
+  const primaryAction = (entry: Entry) => (entry.isCustom ? editInBuilder(entry.tpl) : copyToBuilder(entry.tpl));
+
+  const openPreview = (entry: Entry) => {
+    navigate(`/templates/${encodeURIComponent(entry.tpl.id)}`);
+  };
+
+  const submitImport = () => {
+    setImportError(null);
+    try {
+      const parsed = JSON.parse(importText) as MezgebTemplate;
+      if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.questions)) {
+        setImportError(t("builderImportJsonBadFormat"));
+        return;
+      }
+      const checked = validateTemplate(parsed);
+      setImportOpen(false);
+      navigate(`/templates/${encodeURIComponent(checked.template.id)}/edit`, {
+        state: { template: checked.template },
+      });
+    } catch {
+      setImportError(t("builderImportJsonBadFormat"));
     }
-    setPreviewError([]);
-    safeSetSession("mezgeb_custom_template", JSON.stringify(validated.template));
-    navigate("/playground", { state: { template: validated.template } });
   };
 
-  const handleCustomize = (tpl: MezgebTemplate) => {
-    navigate(`/templates/builder?id=${encodeURIComponent(tpl.id)}`, {
-      state: { template: structuredClone(tpl) },
-    });
-  };
-
-  const openPreview = (tpl: MezgebTemplate) => {
-    setPreviewError([]);
-    setPreviewTab("preview");
-    setPreviewDevice("phone");
-    setPreviewJumpId(tpl.questions[0]?.id ?? null);
-    setPreviewTemplate(tpl);
-  };
-
-  const filterChips: { id: FilterChip; label: string }[] = [
+  const filters: { id: Filter; label: string }[] = [
     { id: "all", label: t("templatesFilterAll") },
     { id: "learning", label: t("templatesFilterLearning") },
     { id: "jobs", label: t("templatesFilterJobs") },
@@ -259,699 +205,502 @@ export function TemplatesPage() {
   ];
 
   return (
-    <Layout>
-      <section aria-labelledby="templates-heading" className="py-12 md:py-16 bg-[#FAF9F6] min-h-[75vh]">
-        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 md:px-10 space-y-10">
-          {/* Header & Controls */}
-          <div className="space-y-6">
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-              <div className="max-w-2xl space-y-2.5">
-                <h1
-                  id="templates-heading"
-                  className="text-3xl md:text-4xl font-bold tracking-tight text-[#111111]"
+    <Layout showFaqInFooter showGiantWordmark mainClassName="mz-console-page">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-8 py-10 text-left">
+        <section className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-8 border-b border-[var(--console-line)]">
+          <div>
+            <p className="text-xs font-mono uppercase tracking-wider text-[var(--accent)] font-semibold mb-1.5">
+              {s.consoleEyebrow}
+            </p>
+            <h1 className="text-3xl sm:text-[2rem] font-semibold text-[var(--ink)] tracking-tight">{s.galleryTitle}</h1>
+            <p className="text-[var(--muted)] text-[15px] mt-1.5">{s.galleryLead}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              to="/docs"
+              className="hidden sm:inline-flex items-center gap-1.5 text-xs font-medium text-[var(--muted)] hover:text-[var(--ink)] px-3 py-2.5 rounded-lg border border-[var(--console-line)] bg-white transition-colors"
+            >
+              {s.galleryFlowGuidelines}
+            </Link>
+            <details className="relative group">
+              <summary className="list-none cursor-pointer inline-flex items-center justify-center gap-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white px-5 py-3 rounded-lg font-medium text-sm transition-all shadow-sm min-h-[44px]">
+                <Plus size={16} strokeWidth={2.25} aria-hidden="true" />
+                {s.galleryCreateTemplate}
+              </summary>
+              <div className="absolute right-0 mt-1.5 w-64 bg-white border border-[var(--console-line)] rounded-xl shadow-lg p-1.5 z-30">
+                <Link
+                  to="/templates/builder"
+                  className="flex items-start gap-2.5 p-2.5 rounded-lg hover:bg-[var(--console-paper)] text-left transition-colors"
                 >
-                  {t("templatesTitle")}
-                </h1>
-                <p className="text-base text-[#6B6B6B]">{t("templatesSubtitle")}</p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3 shrink-0">
-                <Link to="/templates/builder?mode=describe" className="mezgeb-btn-secondary text-sm">
-                  {t("templatesBuildAiLink")}
+                  <div>
+                    <div className="text-xs font-semibold text-[var(--ink)]">{s.galleryStartScratch}</div>
+                    <div className="text-[11px] text-[var(--muted)] mt-0.5 leading-snug">{s.galleryStartScratchBody}</div>
+                  </div>
                 </Link>
-                <Link to="/templates/builder" className="mezgeb-btn-primary text-sm">
-                  {t("templatesOpenBuilderBtn")}
-                </Link>
-              </div>
-            </div>
-
-            {/* Search + Filter chips + Result count */}
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-2">
-              <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t("templatesTitle")}>
-                {filterChips.map((chip) => {
-                  const pressed = activeFilter === chip.id;
-                  return (
-                    <button
-                      key={chip.id}
-                      type="button"
-                      aria-pressed={pressed}
-                      onClick={() => setActiveFilter(chip.id)}
-                      className={`px-3.5 min-h-[40px] rounded-lg border text-sm font-medium transition-colors ${
-                        pressed
-                          ? "bg-[#111111] border-[#111111] text-white"
-                          : "bg-white border-[#E7E7E4] text-[#111111] hover:bg-[#F5F5F3]"
-                      }`}
-                    >
-                      {chip.label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="flex items-center gap-4">
-                <div className="w-full sm:w-64">
-                  <label htmlFor="templates-search" className="sr-only">
-                    {t("templatesSearchLabel")}
-                  </label>
-                  <input
-                    id="templates-search"
-                    type="search"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder={t("templatesSearchPlaceholder")}
-                    className="w-full min-h-[42px] px-3.5 rounded-xl border border-[#E7E7E4] bg-white text-sm text-[#111111]"
-                  />
-                </div>
-                <span
-                  aria-live="polite"
-                  className="text-sm font-medium text-[#6B6B6B] whitespace-nowrap"
+                <Link
+                  to="/templates/builder"
+                  className="flex items-start gap-2.5 p-2.5 rounded-lg hover:bg-[var(--console-paper)] text-left transition-colors"
                 >
-                  {filteredTemplates.length === 1
-                    ? t("templatesResultCountOne")
-                    : t("templatesResultCount", { count: filteredTemplates.length })}
-                </span>
+                  <div>
+                    <div className="text-xs font-semibold text-[var(--accent)]">{s.galleryCreateAi}</div>
+                    <div className="text-[11px] text-[var(--muted)] mt-0.5 leading-snug">{s.galleryCreateAiBody}</div>
+                  </div>
+                </Link>
               </div>
-            </div>
+            </details>
+          </div>
+        </section>
+
+        <section className="mt-8 space-y-4">
+          <div className="relative w-full">
+            <label htmlFor="tpl-search" className="sr-only">
+              {s.gallerySearch}
+            </label>
+            <Search
+              size={20}
+              strokeWidth={1.75}
+              aria-hidden="true"
+              className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--muted)] pointer-events-none"
+            />
+            <input
+              id="tpl-search"
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={s.gallerySearchPlaceholder}
+              className="w-full h-12 pl-12 pr-16 bg-white border border-[var(--console-line)] rounded-lg text-sm text-[var(--ink)] placeholder:text-[var(--muted)] focus:outline-none focus:border-[var(--accent)] focus:ring-4 focus:ring-[var(--lilac)]"
+            />
+            <kbd className="hidden sm:inline font-mono text-[11px] font-semibold text-[var(--muted)] bg-[var(--console-paper)] border border-[var(--console-line)] px-2 py-1 rounded absolute right-3.5 top-1/2 -translate-y-1/2">
+              ⌘K
+            </kbd>
           </div>
 
-          {/* Template Cards Grid */}
-          {filteredTemplates.length === 0 ? (
-            <div className="mezgeb-card p-8 text-center space-y-4">
-              <p className="text-base text-[#6B6B6B]">
-                {activeFilter === "mine" ? t("templatesEmptyMine") : t("templatesEmptySearch")}
-              </p>
-              <Link to="/templates/builder" className="mezgeb-btn-primary text-sm inline-flex">
-                {t("templatesOpenBuilderBtn")}
-              </Link>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {filteredTemplates.map(({ tpl, isCustom }) => {
-                const settings = getEffectiveSettings(tpl);
-                const hasSensitive = tpl.questions.some((q) => Boolean(q.sensitive));
-                const mins = estimateMinutes(tpl);
-                const collects = formatCollectsList(tpl, lang);
-
-                const enabledFeatures: string[] = [];
-                if (settings.voice) enabledFeatures.push(t("featVoice"));
-                if (settings.readAloud) enabledFeatures.push(t("featReadAloud"));
-                if (settings.smartHelp) enabledFeatures.push(t("featHelp"));
-                if (settings.partnerReferral) enabledFeatures.push(t("featPartner"));
-                if (settings.offline) enabledFeatures.push(t("featOffline"));
-
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-1">
+            <div
+              role="group"
+              aria-label={s.galleryFilterLabel}
+              className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 mz-scroll"
+            >
+              {filters.map((f) => {
+                const on = filter === f.id;
                 return (
-                  <article
-                    key={`${isCustom ? "custom" : "builtin"}-${tpl.id}`}
-                    className="mezgeb-card p-6 flex flex-col justify-between gap-5 relative"
+                  <button
+                    key={f.id}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => setFilter(f.id)}
+                    className={`min-h-[36px] px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
+                      on
+                        ? "bg-[var(--lilac)] text-[var(--accent)] border border-transparent"
+                        : "bg-transparent text-[var(--muted)] hover:text-[var(--ink)] hover:bg-white border border-transparent hover:border-[var(--console-line)]"
+                    }`}
                   >
-                    <div className="space-y-4">
-                      {/* Top row: Mini Phone Preview + Meta Header */}
-                      <div className="flex flex-col sm:flex-row items-start gap-4">
-                        <MiniPhonePreview tpl={tpl} lang={lang} />
-
-                        <div className="flex-1 min-w-0 space-y-2">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
-                              <span className="px-2 py-0.5 rounded bg-[#F5F5F3] text-[#111111] border border-[#E7E7E4]">
-                                {getCategoryLabel(tpl.category, t)}
-                              </span>
-                              {tpl.tested === true && (
-                                <span className="px-2 py-0.5 rounded bg-[#E4F2EC] text-[#1F5C46]">
-                                  {t("templatesTestedBadge")}
-                                </span>
-                              )}
-                              {hasSensitive && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#F9F3EA] text-[#111111] border border-[#E7E7E4]">
-                                  <LockIcon size={11} />
-                                  <span>{t("templatesSensitiveBadge")}</span>
-                                </span>
-                              )}
-                            </div>
-
-                            {isCustom && (
-                              <div className="relative" onClick={(e) => e.stopPropagation()}>
-                                <button
-                                  type="button"
-                                  aria-label={t("templatesMoreActions")}
-                                  aria-haspopup="menu"
-                                  aria-expanded={openMenuId === tpl.id}
-                                  onClick={() =>
-                                    setOpenMenuId((prev) => (prev === tpl.id ? null : tpl.id))
-                                  }
-                                  className="w-9 h-9 rounded-lg border border-[#E7E7E4] bg-white hover:bg-[#F5F5F3] flex items-center justify-center text-[#111111]"
-                                >
-                                  <MoreHorizontalIcon size={16} />
-                                </button>
-
-                                {openMenuId === tpl.id && (
-                                  <div
-                                    role="menu"
-                                    className="absolute right-0 mt-1 w-44 rounded-xl bg-white border border-[#E7E7E4] shadow-lg py-1 z-20"
-                                  >
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      onClick={() => {
-                                        const res = duplicateMyTemplate(tpl);
-                                        setMyTemplates(res.templates);
-                                        setOpenMenuId(null);
-                                      }}
-                                      className="w-full text-left px-3.5 py-2 text-sm text-[#111111] hover:bg-[#F5F5F3]"
-                                    >
-                                      {t("templatesActionDuplicate")}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      onClick={() => {
-                                        setRenameTarget(tpl);
-                                        setRenameEn(tpl.name.en);
-                                        setRenameAm(tpl.name.am);
-                                        setOpenMenuId(null);
-                                      }}
-                                      className="w-full text-left px-3.5 py-2 text-sm text-[#111111] hover:bg-[#F5F5F3]"
-                                    >
-                                      {t("templatesActionRename")}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      onClick={() => {
-                                        downloadJsonFile(tpl);
-                                        setOpenMenuId(null);
-                                      }}
-                                      className="w-full text-left px-3.5 py-2 text-sm text-[#111111] hover:bg-[#F5F5F3]"
-                                    >
-                                      {t("templatesActionExport")}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      onClick={() => {
-                                        setDeleteTarget(tpl);
-                                        setOpenMenuId(null);
-                                      }}
-                                      className="w-full text-left px-3.5 py-2 text-sm text-red-700 hover:bg-red-50"
-                                    >
-                                      {t("templatesActionDelete")}
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-
-                          <h2 className="text-[20px] font-semibold text-[#111111] leading-snug">
-                            {tpl.name[lang]}
-                          </h2>
-
-                          <p className="text-sm text-[#6B6B6B] leading-relaxed">
-                            {tpl.description[lang]}
-                          </p>
-
-                          {tpl.bestFor?.[lang] && (
-                            <p className="text-xs text-[#111111]">
-                              <span className="font-semibold">{t("templatesBestForLabel")}</span>{" "}
-                              <span className="text-[#6B6B6B]">{tpl.bestFor[lang]}</span>
-                            </p>
-                          )}
-
-                          {isCustom && tpl.updatedAt && (
-                            <p className="text-xs text-[#6B6B6B]">
-                              {t("templatesEditedOn", {
-                                date: new Date(tpl.updatedAt).toLocaleDateString(),
-                              })}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Facts Row */}
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-[#6B6B6B] pt-1">
-                        <span className="inline-flex items-center gap-1.5 text-[#111111] font-medium">
-                          <QuestionIcon name="check-square" size={14} />
-                          <span>{t("templatesQuestionsCount", { count: tpl.questions.length })}</span>
-                        </span>
-                        <span className="inline-flex items-center gap-1.5 text-[#111111] font-medium">
-                          <ClockIcon size={14} />
-                          <span>{t("templatesEstimateTime", { min: mins })}</span>
-                        </span>
-                        <span className="inline-flex items-center gap-1.5 text-[#111111] font-medium">
-                          <GlobeIcon size={14} />
-                          <span>{t("templatesBothLangs")}</span>
-                        </span>
-                      </div>
-
-                      {/* ID Routes, Features, Collects */}
-                      <div className="space-y-1.5 text-xs border-t border-[#E7E7E4] pt-3">
-                        <p className="text-[#6B6B6B]">
-                          <span className="font-semibold text-[#111111]">{t("templatesIdRoutesLabel")}</span>{" "}
-                          {tpl.idRoutes.map((r) => getIdRouteLabel(r, t)).join(" · ")}
-                        </p>
-                        {enabledFeatures.length > 0 && (
-                          <p className="text-[#6B6B6B]">
-                            <span className="font-semibold text-[#111111]">{t("setFeaturesTitle")}:</span>{" "}
-                            {enabledFeatures.join(" · ")}
-                          </p>
-                        )}
-                        {collects && (
-                          <p className="text-[#6B6B6B]">
-                            <span className="font-semibold text-[#111111]">{t("templatesCollectsLabel")}</span>{" "}
-                            {collects}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex flex-wrap items-center gap-2.5 pt-3 border-t border-[#E7E7E4]">
-                      <button
-                        type="button"
-                        onClick={() => openPreview(tpl)}
-                        className="mezgeb-btn-secondary text-sm"
-                      >
-                        {t("templatesPreviewBtn")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleCustomize(tpl)}
-                        className="mezgeb-btn-secondary text-sm"
-                      >
-                        {t("templatesCustomizeBtn")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleUseInPlayground(tpl)}
-                        className="mezgeb-btn-primary text-sm ml-auto"
-                      >
-                        {t("templatesUseBtn")}
-                      </button>
-                    </div>
-                  </article>
+                    {f.label}
+                    <span className="ml-1 tabular-nums opacity-70">{counts[f.id]}</span>
+                  </button>
                 );
               })}
             </div>
-          )}
-
-          {/* Compare Templates Disclosure */}
-          <div className="pt-4 border-t border-[#E7E7E4] space-y-4">
-            <button
-              type="button"
-              aria-expanded={compareOpen}
-              onClick={() => setCompareOpen((v) => !v)}
-              className="mezgeb-btn-secondary text-sm"
-            >
-              {t("templatesCompareBtn")}
-            </button>
-
-            {compareOpen && (
-              <div className="mezgeb-card overflow-x-auto">
-                <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b border-[#E7E7E4] bg-[#F5F5F3] text-xs font-semibold text-[#111111]">
-                      <th className="py-3 px-4">{t("templatesCompareColTemplate")}</th>
-                      <th className="py-3 px-4">{t("templatesCompareColQuestions")}</th>
-                      <th className="py-3 px-4">{t("templatesCompareColTime")}</th>
-                      <th className="py-3 px-4">{t("templatesCompareColRoutes")}</th>
-                      <th className="py-3 px-4">{t("templatesCompareColVoice")}</th>
-                      <th className="py-3 px-4">{t("templatesCompareColPartner")}</th>
-                      <th className="py-3 px-4">{t("templatesCompareColSensitive")}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#E7E7E4]">
-                    {TEMPLATES.map((tpl) => {
-                      const settings = getEffectiveSettings(tpl);
-                      const hasSensitive = tpl.questions.some((q) => Boolean(q.sensitive));
-                      return (
-                        <tr key={tpl.id} className="bg-white">
-                          <th scope="row" className="py-3 px-4 font-semibold text-[#111111]">
-                            {tpl.name[lang]}
-                          </th>
-                          <td className="py-3 px-4 text-[#6B6B6B]">{tpl.questions.length}</td>
-                          <td className="py-3 px-4 text-[#6B6B6B]">
-                            {t("templatesEstimateTime", { min: estimateMinutes(tpl) })}
-                          </td>
-                          <td className="py-3 px-4 text-[#6B6B6B]">
-                            {tpl.idRoutes.map((r) => getIdRouteLabel(r, t)).join(", ")}
-                          </td>
-                          <td className="py-3 px-4 text-[#111111]">
-                            {settings.voice ? t("yesButton") : t("noButton")}
-                          </td>
-                          <td className="py-3 px-4 text-[#111111]">
-                            {settings.partnerReferral ? t("yesButton") : t("noButton")}
-                          </td>
-                          <td className="py-3 px-4 text-[#111111]">
-                            {hasSensitive ? t("yesButton") : t("noButton")}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <div className="flex items-center gap-3">
+              <label htmlFor="tpl-sort" className="text-xs text-[var(--muted)]">
+                {s.gallerySortLabel}
+              </label>
+              <select
+                id="tpl-sort"
+                value={sort}
+                onChange={(e) => setSort(e.target.value as SortKey)}
+                className="appearance-none bg-white border border-[var(--console-line)] rounded-md text-xs font-medium text-[var(--ink)] py-1.5 pl-2.5 pr-7 cursor-pointer focus:border-[var(--accent)] focus:outline-none"
+              >
+                <option value="updated">{s.gallerySortUpdated}</option>
+                <option value="steps">{s.gallerySortSteps}</option>
+                <option value="az">{s.gallerySortAz}</option>
+              </select>
+              <p
+                aria-live="polite"
+                className="font-mono text-[11px] uppercase tracking-wider font-semibold text-[var(--muted)] bg-white border border-[var(--console-line)] px-2.5 py-1 rounded-md"
+              >
+                {s.n("galleryResults", visible.length)}
+              </p>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* Upgraded Preview Dialog (Two panes + 3 tabs + Phone/Desktop + EN/አማ) */}
-      <AccessibleDialog
-        open={Boolean(previewTemplate)}
-        onClose={() => setPreviewTemplate(null)}
-        title={previewTemplate ? previewTemplate.name[lang] : ""}
-        maxWidthClass="max-w-5xl"
-      >
-        {previewTemplate && (
-          <div className="space-y-5">
-            {previewError.length > 0 && (
-              <div role="alert" className="p-3.5 rounded-xl bg-red-50 border border-red-300 text-sm text-red-900">
-                <p className="font-semibold mb-1">{t("templatesValidationErrorsTitle")}</p>
-                <ul className="list-disc pl-5 space-y-0.5">
-                  {previewError.map((err, i) => (
-                    <li key={i}>{err}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Dialog Top Controls: Tabs + Lang + Phone/Desktop */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E7E7E4] pb-3">
-              <div role="tablist" aria-label={t("templatesPreviewBtn")} className="flex items-center gap-1.5">
-                {(
-                  [
-                    ["preview", t("templatesPreviewTabPreview")],
-                    ["questions", t("templatesPreviewTabQuestions")],
-                    ["json", t("templatesPreviewTabJson")],
-                  ] as const
-                ).map(([tabId, tabLabel]) => (
-                  <button
-                    key={tabId}
-                    type="button"
-                    role="tab"
-                    aria-selected={previewTab === tabId}
-                    onClick={() => setPreviewTab(tabId)}
-                    className={`px-3.5 min-h-[38px] rounded-lg text-xs font-semibold transition-colors ${
-                      previewTab === tabId
-                        ? "bg-[#111111] text-white"
-                        : "bg-[#F5F5F3] text-[#111111] hover:bg-[#E7E7E4]"
-                    }`}
-                  >
-                    {tabLabel}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="inline-flex rounded-lg border border-[#E7E7E4] bg-[#F5F5F3] p-0.5">
-                  <button
-                    type="button"
-                    aria-pressed={lang === "en"}
-                    onClick={() => setLang("en")}
-                    className={`px-2.5 min-h-[32px] rounded-md text-xs font-semibold ${
-                      lang === "en" ? "bg-white text-[#111111]" : "text-[#6B6B6B]"
-                    }`}
-                  >
-                    EN
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={lang === "am"}
-                    onClick={() => setLang("am")}
-                    className={`px-2.5 min-h-[32px] rounded-md text-xs font-semibold ${
-                      lang === "am" ? "bg-white text-[#111111]" : "text-[#6B6B6B]"
-                    }`}
-                  >
-                    አማ
-                  </button>
-                </div>
-
-                {previewTab === "preview" && (
-                  <div className="inline-flex rounded-lg border border-[#E7E7E4] bg-[#F5F5F3] p-0.5">
-                    <button
-                      type="button"
-                      aria-pressed={previewDevice === "phone"}
-                      onClick={() => setPreviewDevice("phone")}
-                      className={`px-2.5 min-h-[32px] rounded-md text-xs font-semibold ${
-                        previewDevice === "phone" ? "bg-white text-[#111111]" : "text-[#6B6B6B]"
-                      }`}
-                    >
-                      {t("templatesPreviewPhone")}
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={previewDevice === "desktop"}
-                      onClick={() => setPreviewDevice("desktop")}
-                      className={`px-2.5 min-h-[32px] rounded-md text-xs font-semibold ${
-                        previewDevice === "desktop" ? "bg-white text-[#111111]" : "text-[#6B6B6B]"
-                      }`}
-                    >
-                      {t("templatesPreviewDesktop")}
-                    </button>
-                  </div>
+        <section aria-label={s.galleryTitle} className="mt-8 pb-16">
+          {visible.length === 0 ? (
+            <div className="rounded-[16px] border border-dashed border-[var(--line-strong)] p-10 md:p-14 max-w-2xl">
+              <h2 className="text-xl font-semibold text-[var(--ink)]">
+                {filter === "mine" && !query
+                  ? s.galleryEmptyMineTitle
+                  : s.f("galleryEmptySearchTitle", { q: query })}
+              </h2>
+              <p className="mt-2 text-[var(--ink-2)] leading-relaxed">
+                {filter === "mine" && !query ? s.galleryEmptyMineBody : s.galleryEmptySearchBody}
+              </p>
+              <div className="mt-5 flex flex-wrap gap-3">
+                {query && (
+                  <Button variant="secondary" onClick={() => setQuery("")}>
+                    {s.galleryClearSearch}
+                  </Button>
+                )}
+                {filter !== "all" && (
+                  <Button variant="secondary" onClick={() => setFilter("all")}>
+                    {t("templatesFilterAll")}
+                  </Button>
                 )}
               </div>
             </div>
-
-            {previewTab === "preview" && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                <div className="lg:col-span-4 space-y-2">
-                  <p className="text-xs font-semibold text-[#6B6B6B]">
-                    {t("templatesPreviewQuestionsHeading")}
-                  </p>
-                  <ol className="space-y-1.5 max-h-[480px] overflow-y-auto pr-1">
-                    {previewTemplate.questions.map((q, idx) => {
-                      const active = previewJumpId === q.id;
-                      return (
-                        <li key={q.id}>
-                          <button
-                            type="button"
-                            onClick={() => setPreviewJumpId(q.id)}
-                            className={`w-full text-left px-3 py-2 rounded-lg border text-xs flex items-center gap-2 transition-colors ${
-                              active
-                                ? "bg-[#EEEBF8] border-[#6A4FC4] text-[#111111] font-semibold"
-                                : "bg-white border-[#E7E7E4] text-[#111111] hover:bg-[#F5F5F3]"
-                            }`}
-                          >
-                            <span className="font-mono text-[#6B6B6B] w-5 shrink-0">{idx + 1}.</span>
-                            <QuestionIcon name={q.icon} size={14} />
-                            <span className="truncate flex-1">{q.label[lang] || q.label.en}</span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ol>
-                </div>
-
-                <div className="lg:col-span-8">
-                  <div
-                    className={
-                      previewDevice === "phone"
-                        ? "w-full max-w-[390px] mx-auto border-[6px] border-[#161616] rounded-[28px] overflow-hidden shadow-md bg-[#FAF9F6]"
-                        : "w-full"
-                    }
+          ) : (
+            <ul className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filter === "all" && !query.trim() && (
+                <li>
+                  <Link
+                    to="/templates/builder"
+                    className="group border-2 border-dashed border-[#D2D2CF] hover:border-[var(--accent)] rounded-2xl p-6 bg-[var(--console-paper)] hover:bg-white transition-all flex flex-col justify-between min-h-[460px] text-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
                   >
-                    <MezgebWidget
-                      key={`pv-${previewTemplate.id}`}
-                      template={previewTemplate}
-                      aiEnabled={false}
-                      offline={false}
-                      readOnly={false}
-                      ephemeralPreview
-                      jumpToQuestionId={previewJumpId}
-                      storageKey={`mezgeb_gallery_preview_${previewTemplate.id}`}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {previewTab === "questions" && (
-              <ol className="divide-y divide-[#E7E7E4] border border-[#E7E7E4] rounded-xl bg-white">
-                {previewTemplate.questions.map((q, idx) => (
-                  <li key={q.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-[#6B6B6B]">
-                        <span className="font-mono font-semibold text-[#111111]">#{idx + 1}</span>
-                        <span>{q.type}</span>
-                        <span>·</span>
-                        <span className="font-mono">{q.maps_to}</span>
-                        {q.required && (
-                          <span className="px-1.5 py-0.5 rounded bg-[#F5F5F3] text-[#111111] font-medium">
-                            {t("builderRequiredBadge")}
-                          </span>
-                        )}
-                        {q.sensitive && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#F9F3EA] text-[#111111] font-medium">
-                            <ShieldIcon size={11} />
-                            <span>{t("templatesSensitiveBadge")}</span>
-                          </span>
-                        )}
+                    <span className="w-full flex justify-end font-mono text-[10px] text-[var(--muted)] uppercase border border-[var(--console-line)] px-2 py-0.5 rounded-full bg-white self-end">
+                      {s.galleryCustomSchema}
+                    </span>
+                    <div className="my-auto flex flex-col items-center">
+                      <div className="w-14 h-14 rounded-full bg-white border border-[var(--console-line)] group-hover:border-[var(--accent)] group-hover:bg-[var(--lilac)] flex items-center justify-center text-[var(--muted)] group-hover:text-[var(--accent)] transition-all mb-4 shadow-sm">
+                        <Plus size={28} strokeWidth={1.5} aria-hidden="true" />
                       </div>
-                      <p className="text-sm font-semibold text-[#111111]">{q.label[lang]}</p>
-                      {q.hint?.[lang] && <p className="text-xs text-[#6B6B6B]">{q.hint[lang]}</p>}
+                      <h2 className="text-lg font-semibold text-[var(--ink)] group-hover:text-[var(--accent)] transition-colors">
+                        {s.galleryStartScratch}
+                      </h2>
+                      <p className="text-xs text-[var(--muted)] max-w-[240px] mt-2 leading-relaxed">{s.galleryStartScratchBody}</p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPreviewJumpId(q.id);
-                        setPreviewTab("preview");
-                      }}
-                      className="mezgeb-btn-secondary text-xs min-h-[36px] shrink-0"
-                    >
-                      {t("templatesPreviewBtn")}
-                    </button>
-                  </li>
-                ))}
-              </ol>
-            )}
-
-            {previewTab === "json" && (
-              <div className="space-y-3">
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(JSON.stringify(previewTemplate, null, 2));
-                        announce(t("copiedAnnouncement"));
-                      } catch {
-                        // ignore
-                      }
+                    <div className="pt-4 border-t border-dashed border-[var(--console-line)]">
+                      <span className="block w-full py-2.5 px-4 bg-white hover:bg-[var(--accent)] hover:text-white border border-[var(--console-line)] hover:border-[var(--accent)] rounded-lg text-xs font-semibold text-[var(--ink)] transition-all text-center">
+                        {s.galleryOpenCanvas}
+                      </span>
+                    </div>
+                  </Link>
+                </li>
+              )}
+              {visible.map((entry) => (
+                <li key={`${entry.isCustom ? "mine" : "builtin"}-${entry.tpl.id}`}>
+                  <TemplateCard
+                    entry={entry}
+                    menuOpen={openMenuId === entry.tpl.id}
+                    onToggleMenu={() => setOpenMenuId((p) => (p === entry.tpl.id ? null : entry.tpl.id))}
+                    onUse={() => primaryAction(entry)}
+                    onPreview={() => openPreview(entry)}
+                    onDuplicate={() => {
+                      setMyTemplates(duplicateMyTemplate(entry.tpl).templates);
+                      setOpenMenuId(null);
                     }}
-                    className="mezgeb-btn-secondary text-xs min-h-[36px]"
-                  >
-                    {t("exportCopyJson")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => downloadJsonFile(previewTemplate)}
-                    className="mezgeb-btn-secondary text-xs min-h-[36px] inline-flex items-center gap-1.5"
-                  >
-                    <DownloadIcon size={14} />
-                    <span>{t("exportDownloadJson")}</span>
-                  </button>
-                </div>
-                <pre className="p-4 rounded-xl bg-[#161616] text-[#E4F2EC] text-xs font-mono overflow-x-auto max-h-96">
-                  <code>{JSON.stringify(previewTemplate, null, 2)}</code>
-                </pre>
-              </div>
-            )}
+                    onRename={() => {
+                      setRenameTarget(entry.tpl);
+                      setRenameEn(entry.tpl.name.en);
+                      setRenameAm(entry.tpl.name.am);
+                      setOpenMenuId(null);
+                    }}
+                    onExport={() => {
+                      downloadJsonFile(entry.tpl);
+                      setOpenMenuId(null);
+                    }}
+                    onDelete={() => {
+                      setDeleteTarget(entry.tpl);
+                      setOpenMenuId(null);
+                    }}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
-            {/* Preview Footer */}
-            <div className="flex flex-wrap items-center justify-end gap-3 pt-3 border-t border-[#E7E7E4]">
-              <button
-                type="button"
-                onClick={() => {
-                  const target = previewTemplate;
-                  setPreviewTemplate(null);
-                  handleCustomize(target);
-                }}
-                className="mezgeb-btn-secondary text-sm"
-              >
-                {t("templatesCustomizeBtn")}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const target = previewTemplate;
-                  setPreviewTemplate(null);
-                  handleUseInPlayground(target);
-                }}
-                className="mezgeb-btn-primary text-sm"
-              >
-                {t("templatesUseBtn")}
-              </button>
-            </div>
-          </div>
-        )}
-      </AccessibleDialog>
+      </div>
 
-      {/* Rename Saved Template Dialog */}
-      <AccessibleDialog
+      <ImportTemplateDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        text={importText}
+        onTextChange={(v) => {
+          setImportText(v);
+          setImportError(null);
+        }}
+        error={importError}
+        onSubmit={submitImport}
+      />
+
+      {/* Rename */}
+      <Dialog
         open={Boolean(renameTarget)}
         onClose={() => setRenameTarget(null)}
         title={t("templatesRenameTitle")}
         maxWidthClass="max-w-md"
+        closeLabel={t("closeButton")}
       >
         {renameTarget && (
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              const res = renameMyTemplate(renameTarget.id, { en: renameEn, am: renameAm });
-              setMyTemplates(res.templates);
+              setMyTemplates(renameMyTemplate(renameTarget.id, { en: renameEn, am: renameAm }).templates);
               setRenameTarget(null);
             }}
             className="space-y-4"
           >
-            <div>
-              <label htmlFor="rename-en" className="block text-sm font-medium text-[#111111] mb-1">
-                {t("templatesRenameLabelEn")}
-              </label>
-              <input
-                id="rename-en"
-                type="text"
-                required
-                value={renameEn}
-                onChange={(e) => setRenameEn(e.target.value)}
-                className="w-full min-h-[42px] px-3 rounded-xl border border-[#E7E7E4] text-sm"
-              />
-            </div>
-            <div>
-              <label htmlFor="rename-am" className="block text-sm font-medium text-[#111111] mb-1">
-                {t("templatesRenameLabelAm")}
-              </label>
-              <input
-                id="rename-am"
-                type="text"
-                required
-                value={renameAm}
-                onChange={(e) => setRenameAm(e.target.value)}
-                className="w-full min-h-[42px] px-3 rounded-xl border border-[#E7E7E4] text-sm"
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setRenameTarget(null)} className="mezgeb-btn-secondary text-sm">
+            <Field
+              id="rename-en"
+              label={t("templatesRenameLabelEn")}
+              inputProps={{ required: true, value: renameEn, onChange: (e) => setRenameEn(e.target.value) }}
+            />
+            <Field
+              id="rename-am"
+              label={t("templatesRenameLabelAm")}
+              labelLang="am"
+              inputProps={{ required: true, lang: "am", value: renameAm, onChange: (e) => setRenameAm(e.target.value) }}
+            />
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={() => setRenameTarget(null)}>
                 {t("cancelButton")}
-              </button>
-              <button type="submit" className="mezgeb-btn-primary text-sm">
+              </Button>
+              <Button type="submit" variant="primary">
                 {t("saveButton")}
-              </button>
+              </Button>
             </div>
           </form>
         )}
-      </AccessibleDialog>
+      </Dialog>
 
-      {/* Delete Saved Template Confirmation Dialog */}
-      <AccessibleDialog
+      {/* Delete */}
+      <Dialog
         open={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
         title={t("templatesDeleteTitle")}
         maxWidthClass="max-w-md"
+        closeLabel={t("closeButton")}
       >
         {deleteTarget && (
           <div className="space-y-5">
-            <p className="text-sm text-[#6B6B6B]">
+            <p className="text-base text-[var(--ink-2)]">
               {t("templatesDeleteConfirm", { name: deleteTarget.name[lang] })}
             </p>
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setDeleteTarget(null)} className="mezgeb-btn-secondary text-sm">
+            <div className="flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
                 {t("cancelButton")}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="danger"
                 onClick={() => {
-                  const res = deleteFromMyTemplates(deleteTarget.id);
-                  setMyTemplates(res.templates);
+                  setMyTemplates(deleteFromMyTemplates(deleteTarget.id).templates);
                   setDeleteTarget(null);
                 }}
-                className="px-4 min-h-[42px] rounded-xl bg-red-700 text-white text-sm font-semibold hover:bg-red-800"
               >
                 {t("templatesDeleteBtn")}
-              </button>
+              </Button>
             </div>
           </div>
         )}
-      </AccessibleDialog>
+      </Dialog>
     </Layout>
+  );
+}
+
+/* ───────────────────────── Card ───────────────────────── */
+
+function TemplateCard({
+  entry,
+  menuOpen,
+  onToggleMenu,
+  onUse,
+  onPreview,
+  onDuplicate,
+  onRename,
+  onExport,
+  onDelete,
+}: {
+  entry: Entry;
+  menuOpen: boolean;
+  onToggleMenu: () => void;
+  onUse: () => void;
+  onPreview: () => void;
+  onDuplicate: () => void;
+  onRename: () => void;
+  onExport: () => void;
+  onDelete: () => void;
+}) {
+  const { lang, t } = useI18n();
+  const s = useTs();
+  const { tpl, isCustom } = entry;
+  const name = tpl.name[lang] || tpl.name.en;
+  const headingId = `tpl-${tpl.id}-name`;
+  const accent = tpl.theme?.accent ?? "#6A4FC4";
+  const menuBtn = useRef<HTMLButtonElement>(null);
+  const firstQ = tpl.questions.find((q) => q.type !== "info");
+  const steps = tpl.questions.filter((q) => q.type !== "info").length;
+  const mins = estimateMinutes(tpl);
+  const settings = getEffectiveSettings(tpl);
+  const pills = buildTemplatePills(tpl, settings, s);
+
+  return (
+    <article
+      aria-labelledby={headingId}
+      className="template-card-stitch h-full flex flex-col overflow-hidden relative"
+    >
+      <div>
+        <div
+          className="h-[180px] bg-[var(--stone)] p-4 relative flex items-center justify-center border-b border-[var(--console-line)] overflow-hidden"
+          style={{
+            background: `linear-gradient(135deg, ${accentSoft(accent)} 0%, var(--stone) 55%, var(--mint) 100%)`,
+          }}
+        >
+          <TemplateCardMock tpl={tpl} firstQ={firstQ} lang={lang} steps={steps} s={s} />
+          <div className="card-hover-actions absolute inset-0 bg-[var(--ink)]/40 backdrop-blur-[2px] flex items-center justify-center gap-2.5 p-4 z-20">
+            <button
+              type="button"
+              onClick={onPreview}
+              className="px-3.5 py-2 bg-white hover:bg-[var(--console-paper)] text-[var(--ink)] text-xs font-semibold rounded-lg border border-white transition-all shadow-sm"
+            >
+              {s.galleryCardPreview}
+            </button>
+            <button
+              type="button"
+              onClick={onUse}
+              className="px-3.5 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-xs font-semibold rounded-lg transition-all shadow-sm"
+            >
+              {s.galleryCardUse}
+            </button>
+          </div>
+        </div>
+
+        <div className="p-5 relative">
+          <div className="flex items-start justify-between gap-2 pr-8">
+            <div className="min-w-0 flex-1">
+              <h2 id={headingId} className="text-lg font-semibold text-[var(--ink)] tracking-tight">
+                {name}
+              </h2>
+              <p className="text-xs text-[var(--muted)] mt-1.5 leading-relaxed line-clamp-2">
+                {tpl.bestFor?.[lang] || tpl.description[lang]}
+              </p>
+            </div>
+          </div>
+          {isCustom && (
+            <div className="absolute top-4 right-4" data-card-menu>
+              <button
+                ref={menuBtn}
+                type="button"
+                aria-label={`${t("templatesMoreActions")}: ${name}`}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={onToggleMenu}
+                className="w-9 h-9 rounded-lg text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--stone)] inline-flex items-center justify-center cursor-pointer"
+              >
+                <MoreHorizontal size={18} strokeWidth={1.75} aria-hidden="true" />
+              </button>
+              {menuOpen && (
+                <div role="menu" className={menuSurfaceClass}>
+                  <button type="button" role="menuitem" onClick={onDuplicate} className={menuItemClass}>
+                    {t("templatesActionDuplicate")}
+                  </button>
+                  <button type="button" role="menuitem" onClick={onRename} className={menuItemClass}>
+                    {t("templatesActionRename")}
+                  </button>
+                  <button type="button" role="menuitem" onClick={onExport} className={menuItemClass}>
+                    {t("templatesActionExport")}
+                  </button>
+                  <div className="my-1 border-t border-[var(--line)]" />
+                  <button type="button" role="menuitem" onClick={onDelete} className={menuItemDangerClass}>
+                    {t("templatesActionDelete")}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          <ul className="flex flex-wrap gap-1.5 mt-4">
+            {pills.map((p) => (
+              <li
+                key={p}
+                className={`font-mono text-[10px] font-semibold uppercase px-2.5 py-0.5 rounded-full border ${
+                  p === s.galleryPillTested
+                    ? "bg-[var(--mint)] text-[var(--mint-ink)] border-[var(--mint-ink)]/20"
+                    : "bg-[var(--console-paper)] border-[var(--console-line)] text-[var(--ink)]"
+                }`}
+              >
+                {p}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <div className="px-5 py-3.5 border-t border-[var(--console-line)] flex items-center justify-between text-[11px] font-mono text-[var(--muted)] bg-white mt-auto">
+        <span className="tracking-tight">
+          {s.f("galleryStepsMeta", { steps, min: mins })}
+        </span>
+        <TemplateMark tpl={tpl} size={22} />
+      </div>
+    </article>
+  );
+}
+
+function accentSoft(accent: string): string {
+  if (accent.startsWith("#") && accent.length === 7) return `${accent}33`;
+  return "var(--lilac)";
+}
+
+function buildTemplatePills(
+  tpl: MezgebTemplate,
+  settings: ReturnType<typeof getEffectiveSettings>,
+  s: ReturnType<typeof useTs>
+): string[] {
+  const pills: string[] = [];
+  if (settings.voice) pills.push(s.galleryPillVoice);
+  pills.push(s.galleryPillBilingual);
+  if (tpl.tested) pills.push(s.galleryPillTested);
+  const noFaydaOnly =
+    tpl.idRoutes.length === 0 ||
+    (tpl.idRoutes.length === 1 && tpl.idRoutes[0] === "partner_refer") ||
+    !tpl.idRoutes.includes("fayda");
+  if (noFaydaOnly) pills.push(s.galleryPillNoId);
+  return pills;
+}
+
+function TemplateCardMock({
+  tpl,
+  firstQ,
+  lang: _lang,
+  steps,
+  s,
+}: {
+  tpl: MezgebTemplate;
+  firstQ: MezgebTemplate["questions"][number] | undefined;
+  lang: "en" | "am";
+  steps: number;
+  s: ReturnType<typeof useTs>;
+}) {
+  const labelAm = firstQ?.label.am || firstQ?.label.en || "…";
+  const labelEn = firstQ?.label.en || "";
+  return (
+    <div className="w-[280px] bg-white rounded-xl border border-[var(--console-line)] p-3 shadow-sm" aria-hidden="true">
+      <div className="flex items-center justify-between text-[10px] text-[var(--muted)] mb-1.5 font-mono">
+        <span>{s.f("galleryStepOf", { n: 1, total: Math.max(steps, 1) })}</span>
+        <span className="text-[var(--mint-ink)]">● {s.galleryMicActive}</span>
+      </div>
+      <p className="text-xs font-semibold text-[var(--ink)] mb-2" lang="am">
+        {labelAm}{" "}
+        {labelEn && (
+          <span className="text-[10px] font-normal text-[var(--muted)]" lang="en">
+            ({labelEn})
+          </span>
+        )}
+      </p>
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-7 bg-[var(--console-paper)] border border-[var(--console-line)] rounded px-2 flex items-center text-[11px] text-[var(--muted)] truncate">
+          {tpl.name.en}
+        </div>
+        <span className="w-7 h-7 rounded bg-[var(--accent)] text-white flex items-center justify-center shrink-0">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+            />
+          </svg>
+        </span>
+      </div>
+    </div>
   );
 }

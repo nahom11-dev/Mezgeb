@@ -1,492 +1,569 @@
-import React, { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
-import { AccessibleDialog } from "../components/AccessibleDialog";
-import { CopyIcon } from "../components/Icons";
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { Check, ChevronRight, RotateCcw } from "lucide-react";
 import { Layout } from "../components/Layout";
-import { useLiveAnnouncer } from "../components/LiveAnnouncer";
-import { MezgebWidget } from "../components/MezgebWidget";
+import { MezgebWidget, MezgebWidgetEvent } from "../components/MezgebWidget";
 import { Lang, useI18n } from "../i18n";
 import { safeGetSession } from "../lib/storage";
-import { getTemplateById, TEMPLATES } from "../templates";
+import { ACCENT_SWATCHES, DEFAULT_WIDGET_THEME, getTemplateById, TEMPLATES } from "../templates";
 import { MezgebTemplate } from "../templates/types";
+import { hexContrastAgainstWhite } from "../templates/validate";
+import { CodeBlock } from "../ui";
+import { inputClass, PhoneFrame, Segmented, selectClass, TemplateMark } from "./templates/kit";
+import { useTs } from "./templates/strings";
 
-function hexToContrastAgainstWhite(hex: string): number {
-  const clean = hex.replace("#", "");
-  if (!/^[0-9a-fA-F]{6}$/.test(clean)) return 1;
-  const r = parseInt(clean.slice(0, 2), 16) / 255;
-  const g = parseInt(clean.slice(2, 4), 16) / 255;
-  const b = parseInt(clean.slice(4, 6), 16) / 255;
-  const toLinear = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
-  const L = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
-  return Number(((1.0 + 0.05) / (L + 0.05)).toFixed(2));
-}
+type CodeTab = "html" | "server" | "webhook" | "config" | "events";
+type ServerLang = "node" | "python" | "php";
+type Hosting = "hosted" | "lite" | "full";
 
-export function PlaygroundPage() {
-  const { lang, t } = useI18n();
-  const { announce } = useLiveAnnouncer();
-  const location = useLocation();
+const CDN = "https://cdn.mezgeb.example/v1/mezgeb.js";
 
-  const [customTemplate, setCustomTemplate] = useState<MezgebTemplate | null>(() => {
-    const stateTpl = (location.state as { template?: MezgebTemplate } | null)?.template;
-    if (stateTpl) return stateTpl;
-    const saved = safeGetSession("mezgeb_custom_template");
-    if (saved) {
-      try {
-        return JSON.parse(saved) as MezgebTemplate;
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  });
+function serverSnippet(kind: ServerLang): { filename: string; code: string } {
+  if (kind === "python") {
+    return {
+      filename: "app.py",
+      code: `# Flask: exchange the one-time token for the learner's profile
+import os, requests
+from flask import Flask, request, jsonify
 
-  useEffect(() => {
-    const stateTpl = (location.state as { template?: MezgebTemplate } | null)?.template;
-    if (stateTpl) setCustomTemplate(stateTpl);
-  }, [location.state]);
+app = Flask(__name__)
 
-  const availableTemplates: MezgebTemplate[] = customTemplate
-    ? [customTemplate, ...TEMPLATES.filter((item) => item.id !== customTemplate.id)]
-    : TEMPLATES;
+@app.post("/auth/mezgeb-callback")
+def mezgeb_callback():
+    token = request.json["token"]
+    r = requests.post(
+        "https://api.mezgeb.example/v1/registrations/exchange",
+        headers={"Authorization": f"Bearer {os.environ['MEZGEB_SECRET_KEY']}"},
+        json={"token": token},
+        timeout=10,
+    )
+    r.raise_for_status()
+    profile = r.json()
+    # save profile["id"], profile["name"], ... to your users table
+    return jsonify(ok=True)`,
+    };
+  }
+  if (kind === "php") {
+    return {
+      filename: "mezgeb-callback.php",
+      code: `<?php
+// Exchange the one-time token for the learner's profile
+$token = json_decode(file_get_contents("php://input"), true)["token"];
 
-  const [templateId, setTemplateId] = useState<string>(availableTemplates[0].id);
-  const [siteKey, setSiteKey] = useState("pk_test_learnhub");
-  const [defaultLang, setDefaultLang] = useState<Lang>("am");
-  const [integrationType, setIntegrationType] = useState<"embed" | "button">("embed");
-  const [accentInput, setAccentInput] = useState("#6A4FC4");
-  const [validAccent, setValidAccent] = useState("#6A4FC4");
-  const [hosting, setHosting] = useState<"hosted" | "lite" | "full">("hosted");
+$ch = curl_init("https://api.mezgeb.example/v1/registrations/exchange");
+curl_setopt_array($ch, [
+  CURLOPT_POST => true,
+  CURLOPT_RETURNTRANSFER => true,
+  CURLOPT_HTTPHEADER => [
+    "Content-Type: application/json",
+    "Authorization: Bearer " . getenv("MEZGEB_SECRET_KEY"),
+  ],
+  CURLOPT_POSTFIELDS => json_encode(["token" => $token]),
+]);
+$profile = json_decode(curl_exec($ch), true);
+curl_close($ch);
 
-  const [activeTab, setActiveTab] = useState<"page" | "server" | "webhook" | "selfhost">("page");
-  const [serverLang, setServerLang] = useState<"node" | "python" | "php">("node");
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  // Test registration dialog
-  const [testOpen, setTestOpen] = useState(false);
-  const [testResult, setTestResult] = useState<{
-    token: string;
-    profile: Record<string, unknown>;
-    supportShared: boolean;
-  } | null>(null);
-
-  const selectedTemplate =
-    availableTemplates.find((tpl) => tpl.id === templateId) ?? getTemplateById(templateId);
-
-  const contrastRatio = hexToContrastAgainstWhite(accentInput);
-  const contrastPasses = contrastRatio >= 4.5;
-
-  const handleAccentChange = (nextHex: string) => {
-    setAccentInput(nextHex);
-    if (hexToContrastAgainstWhite(nextHex) >= 4.5) {
-      setValidAccent(nextHex);
-    }
-  };
-
-  const handleCopy = async (id: string, text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      // ignore clipboard fallback
-    }
-    setCopiedId(id);
-    announce(t("copiedAnnouncement"));
-    window.setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const pageSnippet =
-    integrationType === "embed"
-      ? `<script type="module" src="https://cdn.mezgeb.example/v1/mezgeb.js"></script>\n<mezgeb-register\n  site-key="${siteKey}"\n  lang="${defaultLang}"\n  template="${selectedTemplate.id}"\n  theme-accent="${validAccent}"\n></mezgeb-register>`
-      : `<a\n  href="https://join.mezgeb.example/start?site_key=${encodeURIComponent(
-          siteKey
-        )}&template=${encodeURIComponent(selectedTemplate.id)}&lang=${defaultLang}&return_url=https://yoursite.example/callback"\n  style="display:inline-flex;align-items:center;padding:10px 18px;border-radius:8px;background:${validAccent};color:#ffffff;font-weight:600;text-decoration:none"\n>\n  Sign up with Mezgeb\n</a>`;
-
-  const serverSnippets: Record<"node" | "python" | "php", string> = {
-    node: `app.post("/auth/mezgeb-callback", async (req, res) => {
+// save $profile["id"], $profile["name"], ... to your users table
+header("Content-Type: application/json");
+echo json_encode(["ok" => true]);`,
+    };
+  }
+  return {
+    filename: "server.ts",
+    code: `// Express: exchange the one-time token for the learner's profile
+app.post("/auth/mezgeb-callback", async (req, res) => {
   const { token } = req.body;
   const r = await fetch("https://api.mezgeb.example/v1/registrations/exchange", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": \`Bearer \${process.env.MEZGEB_SECRET_KEY}\`,
+      Authorization: \`Bearer \${process.env.MEZGEB_SECRET_KEY}\`,
     },
     body: JSON.stringify({ token }),
   });
   const profile = await r.json();
-  const user = await db.users.upsert({ externalId: profile.id, ...profile });
-  req.session.userId = user.id;
+  await db.users.upsert({ externalId: profile.id, ...profile });
   res.json({ ok: true });
 });`,
-    python: `@app.post("/auth/mezgeb-callback")
-async def mezgeb_callback(payload: dict, request: Request):
-    async with httpx.AsyncClient() as client:
-        r = await client.post(
-            "https://api.mezgeb.example/v1/registrations/exchange",
-            headers={"Authorization": f"Bearer {os.environ['MEZGEB_SECRET_KEY']}"},
-            json={"token": payload["token"]},
-        )
-    profile = r.json()
-    user = await db.upsert_user(profile)
-    request.session["user_id"] = user.id
-    return {"ok": True}`,
-    php: `<?php
-$body = json_decode(file_get_contents('php://input'), true);
-$ch = curl_init('https://api.mezgeb.example/v1/registrations/exchange');
-curl_setopt_array($ch, [
-  CURLOPT_POST => true,
-  CURLOPT_RETURNTRANSFER => true,
-  CURLOPT_HTTPHEADER => [
-    'Content-Type: application/json',
-    'Authorization: Bearer ' . getenv('MEZGEB_SECRET_KEY'),
-  ],
-  CURLOPT_POSTFIELDS => json_encode(['token' => $body['token']]),
-]);
-$profile = json_decode(curl_exec($ch), true);
-$_SESSION['user_id'] = upsert_user($profile);
-echo json_encode(['ok' => true]);`,
+  };
+}
+
+export function PlaygroundPage() {
+  const { lang, setLang, t } = useI18n();
+  const s = useTs();
+  const location = useLocation();
+
+  const [customTemplate, setCustomTemplate] = useState<MezgebTemplate | null>(() => {
+    const fromState = (location.state as { template?: MezgebTemplate } | null)?.template;
+    if (fromState) return fromState;
+    const saved = safeGetSession("mezgeb_custom_template");
+    if (!saved) return null;
+    try {
+      return JSON.parse(saved) as MezgebTemplate;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    const fromState = (location.state as { template?: MezgebTemplate } | null)?.template;
+    if (fromState) setCustomTemplate(fromState);
+  }, [location.state]);
+
+  const available: MezgebTemplate[] = useMemo(
+    () => (customTemplate ? [customTemplate, ...TEMPLATES.filter((x) => x.id !== customTemplate.id)] : TEMPLATES),
+    [customTemplate]
+  );
+
+  const [templateId, setTemplateId] = useState<string>(available[0].id);
+  const selected = available.find((x) => x.id === templateId) ?? getTemplateById(templateId);
+  const templateAccent = selected.theme?.accent ?? DEFAULT_WIDGET_THEME.accent;
+
+  const [themeMode, setThemeMode] = useState<"light" | "hc">("light");
+  const [siteKey, setSiteKey] = useState("pk_test_learnhub");
+  const [integration, setIntegration] = useState<"embed" | "button">("embed");
+  const [accentInput, setAccentInput] = useState(templateAccent);
+  const [validAccent, setValidAccent] = useState(templateAccent);
+  const [hosting, setHosting] = useState<Hosting>("hosted");
+
+  const [codeTab, setCodeTab] = useState<CodeTab>("html");
+  const [serverLang, setServerLang] = useState<ServerLang>("node");
+  const [runKey, setRunKey] = useState(0);
+  const [events, setEvents] = useState<MezgebWidgetEvent[]>([]);
+  const [latestProfile, setLatestProfile] = useState<Record<string, unknown> | null>(null);
+
+  const ratio = hexContrastAgainstWhite(accentInput);
+  const accentOk = ratio >= 4.5;
+
+  const changeAccent = (hex: string) => {
+    setAccentInput(hex);
+    if (hexContrastAgainstWhite(hex) >= 4.5) setValidAccent(hex);
   };
 
-  const webhookSnippet = `app.post("/webhooks/mezgeb", (req, res) => {
-  const sig = req.header("X-Mezgeb-Signature");
-  if (!verifyHmac(req.rawBody, sig, process.env.MEZGEB_WEBHOOK_SECRET)) {
-    return res.status(401).end();
-  }
-  if (req.body.event === "profile.updated") {
-    await db.users.updateByExternalId(req.body.data.id, req.body.data);
-  }
-  res.status(200).json({ received: true });
-});`;
+  const pickTemplate = (id: string) => {
+    const next = available.find((x) => x.id === id) ?? getTemplateById(id);
+    const accent = next.theme?.accent ?? DEFAULT_WIDGET_THEME.accent;
+    setTemplateId(id);
+    setAccentInput(accent);
+    setValidAccent(accent);
+    setEvents([]);
+    setLatestProfile(null);
+    setRunKey((k) => k + 1);
+  };
 
-  const selfHostProfile = hosting === "full" ? "full" : "lite";
-  const selfHostSnippet = `# Run Mezgeb on your own server
-docker compose --profile ${selfHostProfile} up -d
+  const restart = () => {
+    setEvents([]);
+    setLatestProfile(null);
+    setRunKey((k) => k + 1);
+  };
 
-# .env
-MEZGEB_PORT=8080
-MEZGEB_SITE_KEY=${siteKey}
-MEZGEB_SECRET_KEY=sk_live_replace_with_random_secret
-MEZGEB_SPEECH=${hosting === "full" ? "local-whisper-eth" : "off"}
-MEZGEB_AI=${hosting === "full" ? "local-llm" : "off"}
-MEZGEB_CLOUD_AI=off`;
+  const htmlSnippet =
+    integration === "embed"
+      ? `<script type="module" src="${CDN}"></script>
+<mezgeb-register
+  site-key="${siteKey}"
+  template="${selected.id}"
+  lang="${lang}"
+  theme="${themeMode}"
+  accent="${validAccent}"
+></mezgeb-register>
+
+<script>
+  document.querySelector("mezgeb-register")
+    .addEventListener("mezgeb:complete", (e) => {
+      // Send the one-time token to your server (see "Your server")
+      fetch("/auth/mezgeb-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: e.detail.token }),
+      });
+    });
+</script>`
+      : `<a href="https://join.mezgeb.example/start?site_key=${encodeURIComponent(siteKey)}&template=${encodeURIComponent(
+          selected.id
+        )}&lang=${lang}&theme=${themeMode}&return_url=https://yoursite.example/callback">
+  Sign up with Mezgeb
+</a>`;
+
+  const configSnippet = JSON.stringify(
+    {
+      siteKey,
+      template: selected.id,
+      lang,
+      theme: themeMode,
+      accent: validAccent,
+      hosting,
+      speech: hosting === "full" ? "local-whisper-eth" : "browser-or-off",
+      offlineOutbox: true,
+    },
+    null,
+    2
+  );
+
+  const webhookSnippet = JSON.stringify(
+    {
+      event: "registration.completed",
+      created_at: new Date().toISOString().slice(0, 19) + "Z",
+      site_key: siteKey,
+      template: selected.id,
+      data: latestProfile ?? {
+        id: "usr_sample_92a1",
+        name: "Hana Tesfaye",
+        preferred_language: lang,
+        area: "lideta",
+        id_route: "partner_pending",
+        skills: ["Sales", "Bookkeeping"],
+        support_shared: false,
+      },
+    },
+    null,
+    2
+  );
+
+  const server = serverSnippet(serverLang);
+
+  const tabs: { id: CodeTab; label: string; badge?: number }[] = [
+    { id: "html", label: s.pgTabHtml },
+    { id: "server", label: s.pgTabServer },
+    { id: "webhook", label: s.pgTabWebhook },
+    { id: "config", label: s.pgTabConfig },
+    { id: "events", label: s.pgTabEvents, badge: events.length },
+  ];
+
+  const codeProps = {
+    wrap: true,
+    copyLabel: t("copyCodeBtn"),
+    copiedLabel: t("copiedButton"),
+    copiedAnnouncement: t("copiedAnnouncement"),
+  };
+
+  const onTabKey = (e: React.KeyboardEvent, i: number) => {
+    let next: number | null = null;
+    if (e.key === "ArrowRight") next = (i + 1) % tabs.length;
+    if (e.key === "ArrowLeft") next = (i - 1 + tabs.length) % tabs.length;
+    if (next === null) return;
+    e.preventDefault();
+    setCodeTab(tabs[next].id);
+    document.getElementById(`pg-tab-${tabs[next].id}`)?.focus();
+  };
 
   return (
     <Layout>
-      <section aria-labelledby="playground-heading" className="py-12 md:py-16 bg-[#FAF9F6] min-h-[75vh]">
-        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 md:px-10 space-y-8">
-          <div className="max-w-2xl space-y-2">
-            <h1 id="playground-heading" className="text-3xl md:text-4xl font-bold tracking-tight text-[#111111]">
-              {t("playgroundTitle")}
-            </h1>
-            <p className="text-base text-[#6B6B6B]">{t("playgroundSubtitle")}</p>
+      <div className="bg-[var(--paper)] text-left">
+        <header className="max-w-[1440px] mx-auto px-4 sm:px-6 pt-10 md:pt-12 pb-6 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div className="max-w-[62ch] space-y-2">
+            <h1 className="mezgeb-display-heading text-[2rem] md:text-[2.5rem] font-semibold text-[var(--ink)]">{s.pgTitle}</h1>
+            <p className="text-[1.0625rem] leading-relaxed text-[var(--ink-2)]">{s.pgLead}</p>
           </div>
+          <Link
+            to="/docs"
+            className="inline-flex items-center gap-1 text-sm font-medium text-[var(--ink)] underline underline-offset-4 shrink-0"
+          >
+            {t("navDocs")}
+            <ChevronRight size={16} strokeWidth={1.75} aria-hidden="true" />
+          </Link>
+        </header>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* Left settings */}
-            <div className="lg:col-span-5 mezgeb-card p-6 space-y-5">
-              <h2 className="text-lg font-semibold text-[#111111]">{t("playgroundSettingsTitle")}</h2>
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 pb-16">
+          <div className="rounded-[20px] border border-[var(--line)] overflow-hidden grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_minmax(0,500px)]">
+            {/* ───── Setup ───── */}
+            <section aria-labelledby="pg-setup" className="border-y lg:border-y-0 lg:border-r border-[var(--line)] p-5 space-y-6">
+              <h2 id="pg-setup" className="text-[15px] font-semibold text-[var(--ink)]">
+                {s.pgSetup}
+              </h2>
 
-              <div>
-                <label htmlFor="pg-template" className="block text-sm font-medium text-[#111111] mb-1.5">
-                  {t("playgroundTemplateLabel")}
+              <div className="space-y-1.5">
+                <label htmlFor="pg-template" className="block text-[13px] font-medium text-[var(--muted)]">
+                  {s.pgTemplate}
                 </label>
-                <select
-                  id="pg-template"
-                  value={selectedTemplate.id}
-                  onChange={(e) => setTemplateId(e.target.value)}
-                  className="w-full min-h-[44px] px-3.5 rounded-xl border border-[#E7E7E4] bg-white text-sm"
-                >
-                  {availableTemplates.map((tpl) => (
-                    <option key={tpl.id} value={tpl.id}>
-                      {tpl.name[lang]}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-2">
+                  <TemplateMark tpl={selected} size={44} />
+                  <select id="pg-template" value={selected.id} onChange={(e) => pickTemplate(e.target.value)} className={selectClass}>
+                    {available.map((tpl) => (
+                      <option key={tpl.id} value={tpl.id}>
+                        {tpl.name[lang] || tpl.name.en}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {customTemplate && selected.id === customTemplate.id && (
+                  <p className="text-[12px] text-[var(--muted)]">{s.pgFromBuilder}</p>
+                )}
               </div>
 
-              <div>
-                <label htmlFor="pg-sitekey" className="block text-sm font-medium text-[#111111] mb-1.5">
-                  {t("playgroundSiteKeyLabel")}
+              <Segmented
+                fullWidth
+                label={s.pgLanguage}
+                value={lang}
+                onChange={(v: Lang) => setLang(v)}
+                options={[
+                  { value: "am", label: "አማርኛ", lang: "am" },
+                  { value: "en", label: "English", lang: "en" },
+                ]}
+              />
+
+              <Segmented
+                fullWidth
+                label={s.pgTheme}
+                value={themeMode}
+                onChange={setThemeMode}
+                options={[
+                  { value: "light", label: s.pgThemeLight },
+                  { value: "hc", label: s.pgThemeHc },
+                ]}
+              />
+
+              <fieldset className="space-y-2.5">
+                <legend className="text-[13px] font-medium text-[var(--muted)] mb-1.5">{s.pgAccent}</legend>
+                <div className="flex flex-wrap items-center gap-2">
+                  {Array.from(new Set([templateAccent, ...ACCENT_SWATCHES])).map((hex) => {
+                    const on = validAccent.toLowerCase() === hex.toLowerCase() && accentOk;
+                    return (
+                      <button
+                        key={hex}
+                        type="button"
+                        aria-label={hex}
+                        aria-pressed={on}
+                        onClick={() => changeAccent(hex)}
+                        style={{ backgroundColor: hex }}
+                        className={`w-8 h-8 rounded-full inline-flex items-center justify-center text-white cursor-pointer ${
+                          on ? "ring-2 ring-offset-2 ring-[var(--ink)]" : ""
+                        }`}
+                      >
+                        {on && <Check size={15} strokeWidth={2.5} aria-hidden="true" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    aria-label={`${s.pgAccent}: custom`}
+                    value={/^#[0-9a-f]{6}$/i.test(accentInput) ? accentInput : validAccent}
+                    onChange={(e) => changeAccent(e.target.value)}
+                    className="w-11 h-11 shrink-0 rounded-[10px] border border-[var(--line-strong)] bg-[var(--paper)] cursor-pointer p-1"
+                  />
+                  <input
+                    aria-label={`${s.pgAccent} hex`}
+                    value={accentInput}
+                    spellCheck={false}
+                    onChange={(e) => changeAccent(e.target.value)}
+                    className={`${inputClass} font-mono !text-sm`}
+                  />
+                </div>
+                <p role="status" className={`text-[13px] leading-snug ${accentOk ? "text-[var(--mint-ink)]" : "text-[var(--error)]"}`}>
+                  {accentOk ? s.f("pgAccentPass", { ratio }) : s.f("pgAccentFail", { ratio })}
+                </p>
+              </fieldset>
+
+              <Segmented
+                fullWidth
+                label={s.pgIntegration}
+                value={integration}
+                onChange={setIntegration}
+                options={[
+                  { value: "embed", label: s.pgEmbed },
+                  { value: "button", label: s.pgButton },
+                ]}
+              />
+
+              <div className="space-y-1.5">
+                <label htmlFor="pg-sitekey" className="block text-[13px] font-medium text-[var(--muted)]">
+                  {s.pgSiteKey}
                 </label>
                 <input
                   id="pg-sitekey"
-                  type="text"
                   value={siteKey}
+                  spellCheck={false}
+                  aria-describedby="pg-sitekey-hint"
                   onChange={(e) => setSiteKey(e.target.value)}
-                  className="w-full min-h-[44px] px-3.5 rounded-xl border border-[#E7E7E4] font-mono text-sm"
+                  className={`${inputClass} font-mono !text-sm`}
                 />
-              </div>
-
-              <div>
-                <label htmlFor="pg-lang" className="block text-sm font-medium text-[#111111] mb-1.5">
-                  {t("playgroundDefaultLangLabel")}
-                </label>
-                <select
-                  id="pg-lang"
-                  value={defaultLang}
-                  onChange={(e) => setDefaultLang(e.target.value as Lang)}
-                  className="w-full min-h-[44px] px-3.5 rounded-xl border border-[#E7E7E4] bg-white text-sm"
-                >
-                  <option value="am">am (Amharic)</option>
-                  <option value="en">en (English)</option>
-                </select>
-              </div>
-
-              <div>
-                <span className="block text-sm font-medium text-[#111111] mb-1.5">
-                  {t("playgroundTypeLabel")}
-                </span>
-                <div className="grid grid-cols-1 gap-2">
-                  <label className="flex items-center gap-2.5 p-3 rounded-xl border border-[#E7E7E4] cursor-pointer text-sm">
-                    <input
-                      type="radio"
-                      name="pg-type"
-                      checked={integrationType === "embed"}
-                      onChange={() => setIntegrationType("embed")}
-                      className="accent-[#6A4FC4]"
-                    />
-                    <span>{t("playgroundTypeEmbed")}</span>
-                  </label>
-                  <label className="flex items-center gap-2.5 p-3 rounded-xl border border-[#E7E7E4] cursor-pointer text-sm">
-                    <input
-                      type="radio"
-                      name="pg-type"
-                      checked={integrationType === "button"}
-                      onChange={() => setIntegrationType("button")}
-                      className="accent-[#6A4FC4]"
-                    />
-                    <span>{t("playgroundTypeButton")}</span>
-                  </label>
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="pg-accent" className="block text-sm font-medium text-[#111111] mb-1.5">
-                  {t("playgroundAccentLabel")}
-                </label>
-                <div className="flex items-center gap-3">
-                  <input
-                    id="pg-accent"
-                    type="color"
-                    value={accentInput}
-                    onChange={(e) => handleAccentChange(e.target.value)}
-                    className="w-12 h-11 rounded-lg border border-[#E7E7E4] p-1 bg-white cursor-pointer"
-                  />
-                  <input
-                    type="text"
-                    value={accentInput}
-                    onChange={(e) => handleAccentChange(e.target.value)}
-                    aria-label="Accent hex colour"
-                    className="flex-1 min-h-[44px] px-3 rounded-xl border border-[#E7E7E4] font-mono text-sm"
-                  />
-                </div>
-                <p
-                  role="status"
-                  className={`mt-2 text-xs font-medium ${
-                    contrastPasses ? "text-[#1F5C46]" : "text-red-700"
-                  }`}
-                >
-                  {contrastPasses
-                    ? t("playgroundAccentContrastPass", { ratio: contrastRatio })
-                    : t("playgroundAccentContrastFail", { ratio: contrastRatio })}
+                <p id="pg-sitekey-hint" className="text-[12px] text-[var(--muted)]">
+                  {s.pgSiteKeyHint}
                 </p>
               </div>
 
-              <div>
-                <label htmlFor="pg-hosting" className="block text-sm font-medium text-[#111111] mb-1.5">
-                  {t("playgroundHostingLabel")}
+              <div className="space-y-1.5">
+                <label htmlFor="pg-hosting" className="block text-[13px] font-medium text-[var(--muted)]">
+                  {s.pgHosting}
                 </label>
-                <select
-                  id="pg-hosting"
-                  value={hosting}
-                  onChange={(e) => setHosting(e.target.value as "hosted" | "lite" | "full")}
-                  className="w-full min-h-[44px] px-3.5 rounded-xl border border-[#E7E7E4] bg-white text-sm"
-                >
+                <select id="pg-hosting" value={hosting} onChange={(e) => setHosting(e.target.value as Hosting)} className={selectClass}>
                   <option value="hosted">{t("playgroundHostingHosted")}</option>
                   <option value="lite">{t("playgroundHostingLite")}</option>
                   <option value="full">{t("playgroundHostingFull")}</option>
                 </select>
               </div>
+            </section>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setTestResult(null);
-                  setTestOpen(true);
-                }}
-                className="w-full mezgeb-btn-primary"
-              >
-                {t("playgroundTestBtn")}
-              </button>
-            </div>
-
-            {/* Right outputs */}
-            <div className="lg:col-span-7 space-y-6">
-              <div className="mezgeb-card overflow-hidden">
-                <div
-                  role="tablist"
-                  aria-label="Code outputs"
-                  className="flex flex-wrap border-b border-[#E7E7E4] bg-[#F5F5F3] px-2 pt-2 gap-1"
+            {/* ───── Preview ───── */}
+            <section aria-labelledby="pg-preview" className="order-first lg:order-none mz-canvas min-w-0 border-b xl:border-b-0 xl:border-r border-[var(--line)] flex flex-col">
+              <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-[var(--line)] bg-[var(--stone)]/90 backdrop-blur">
+                <h2 id="pg-preview" className="text-[15px] font-semibold text-[var(--ink)]">
+                  {s.pgPreview}
+                </h2>
+                <button
+                  type="button"
+                  onClick={restart}
+                  className="inline-flex items-center gap-1.5 min-h-[36px] px-3 rounded-[10px] text-sm font-medium text-[var(--ink)] hover:bg-[var(--paper)] cursor-pointer"
                 >
-                  {(
-                    [
-                      ["page", t("playgroundTabPage")],
-                      ["server", t("playgroundTabServer")],
-                      ["webhook", t("playgroundTabWebhook")],
-                      ["selfhost", t("playgroundTabSelfHost")],
-                    ] as const
-                  ).map(([id, label]) => (
+                  <RotateCcw size={16} strokeWidth={1.75} aria-hidden="true" />
+                  {s.pgRestart}
+                </button>
+              </div>
+              <div className={`flex-1 px-4 py-8 ${themeMode === "hc" ? "mezgeb-hc" : ""}`}>
+                <PhoneFrame width={380}>
+                  <MezgebWidget
+                    key={`pg-${runKey}-${selected.id}-${lang}`}
+                    template={selected}
+                    aiEnabled={false}
+                    offline={false}
+                    ephemeralPreview
+                    highContrast={themeMode === "hc"}
+                    accentColor={validAccent}
+                    platformName={selected.theme?.platformName}
+                    siteKey={siteKey}
+                    storageKey={`mezgeb_playground_${selected.id}`}
+                    onEvent={(ev) => setEvents((prev) => [ev, ...prev])}
+                    onComplete={(res) => setLatestProfile(res.profile)}
+                  />
+                </PhoneFrame>
+              </div>
+            </section>
+
+            {/* ───── Code + events ───── */}
+            <section aria-labelledby="pg-code" className="min-w-0 lg:col-span-2 xl:col-span-1 lg:border-t xl:border-t-0 border-[var(--line)] flex flex-col">
+              <h2 id="pg-code" className="sr-only">
+                {s.pgCode}
+              </h2>
+              <div role="tablist" aria-label={s.pgCode} className="flex items-stretch gap-1 px-3 border-b border-[var(--line)] overflow-x-auto mz-scroll">
+                {tabs.map((tab, i) => {
+                  const on = codeTab === tab.id;
+                  return (
                     <button
-                      key={id}
+                      key={tab.id}
+                      id={`pg-tab-${tab.id}`}
                       role="tab"
                       type="button"
-                      aria-selected={activeTab === id}
-                      onClick={() => setActiveTab(id)}
-                      className={`px-4 min-h-[42px] rounded-t-lg text-sm font-medium transition-colors ${
-                        activeTab === id
-                          ? "bg-white text-[#111111] border border-b-white border-[#E7E7E4] -mb-px"
-                          : "text-[#6B6B6B] hover:text-[#111111]"
+                      aria-selected={on}
+                      aria-controls="pg-tabpanel"
+                      tabIndex={on ? 0 : -1}
+                      onClick={() => setCodeTab(tab.id)}
+                      onKeyDown={(e) => onTabKey(e, i)}
+                      className={`mezgeb-transition inline-flex items-center gap-1.5 min-h-[48px] px-3 text-sm whitespace-nowrap border-b-2 -mb-px cursor-pointer ${
+                        on ? "border-[var(--ink)] text-[var(--ink)] font-semibold" : "border-transparent text-[var(--muted)] hover:text-[var(--ink)] font-medium"
                       }`}
                     >
-                      {label}
+                      {tab.label}
+                      {tab.badge !== undefined && tab.badge > 0 && (
+                        <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--ink)] text-[var(--paper)] text-[11px] font-semibold inline-flex items-center justify-center tabular-nums">
+                          {tab.badge}
+                        </span>
+                      )}
                     </button>
-                  ))}
-                </div>
-
-                <div className="p-5 sm:p-6 space-y-4">
-                  {activeTab === "page" && (
-                    <CodeBlockWithCopy
-                      id="pg-page"
-                      title="index.html"
-                      code={pageSnippet}
-                      copiedId={copiedId}
-                      onCopy={handleCopy}
-                    />
-                  )}
-
-                  {activeTab === "server" && (
-                    <div className="space-y-4">
-                      <div className="inline-flex rounded-lg border border-[#E7E7E4] bg-[#F5F5F3] p-0.5">
-                        {(
-                          [
-                            ["node", "Node / Express"],
-                            ["python", "Python / FastAPI"],
-                            ["php", "PHP"],
-                          ] as const
-                        ).map(([id, label]) => (
-                          <button
-                            key={id}
-                            type="button"
-                            onClick={() => setServerLang(id)}
-                            aria-pressed={serverLang === id}
-                            className={`px-3 min-h-[36px] rounded-md text-xs font-semibold ${
-                              serverLang === id ? "bg-white text-[#111111] shadow-xs" : "text-[#6B6B6B]"
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                      <CodeBlockWithCopy
-                        id={`pg-srv-${serverLang}`}
-                        title={`server.${serverLang === "node" ? "ts" : serverLang === "python" ? "py" : "php"}`}
-                        code={serverSnippets[serverLang]}
-                        copiedId={copiedId}
-                        onCopy={handleCopy}
-                      />
-                    </div>
-                  )}
-
-                  {activeTab === "webhook" && (
-                    <CodeBlockWithCopy
-                      id="pg-webhook"
-                      title="webhook-handler.ts"
-                      code={webhookSnippet}
-                      copiedId={copiedId}
-                      onCopy={handleCopy}
-                    />
-                  )}
-
-                  {activeTab === "selfhost" && (
-                    <CodeBlockWithCopy
-                      id="pg-selfhost"
-                      title={`docker-compose (${selfHostProfile})`}
-                      code={selfHostSnippet}
-                      copiedId={copiedId}
-                      onCopy={handleCopy}
-                    />
-                  )}
-                </div>
+                  );
+                })}
               </div>
 
-              {testResult && (
-                <div className="mezgeb-card p-6 space-y-3">
-                  <h2 className="text-lg font-semibold text-[#111111]">{t("playgroundTestResultTitle")}</h2>
-                  <p className="text-xs font-mono text-[#1F5C46] bg-[#E4F2EC] px-3 py-2 rounded-lg">
-                    POST /v1/registrations/exchange · token: {testResult.token} · 200 OK
-                  </p>
-                  <pre className="p-4 rounded-xl bg-[#161616] text-[#E4F2EC] text-xs font-mono overflow-x-auto">
-                    <code>{JSON.stringify(testResult.profile, null, 2)}</code>
-                  </pre>
-                </div>
-              )}
-            </div>
+              <div id="pg-tabpanel" role="tabpanel" aria-labelledby={`pg-tab-${codeTab}`} className="p-5 space-y-4 min-w-0">
+                {codeTab === "html" && (
+                  <CodeBlock filename={integration === "embed" ? "signup.html" : "button.html"} code={htmlSnippet} {...codeProps} />
+                )}
+
+                {codeTab === "server" && (
+                  <>
+                    <p className="text-sm text-[var(--ink-2)] leading-relaxed">{s.pgServerNote}</p>
+                    <Segmented
+                      size="sm"
+                      label={s.pgTabServer}
+                      hideLabel
+                      value={serverLang}
+                      onChange={setServerLang}
+                      options={[
+                        { value: "node", label: "Node.js" },
+                        { value: "python", label: "Python" },
+                        { value: "php", label: "PHP" },
+                      ]}
+                    />
+                    <CodeBlock filename={server.filename} code={server.code} {...codeProps} />
+                  </>
+                )}
+
+                {codeTab === "webhook" && (
+                  <>
+                    <p className="text-sm text-[var(--ink-2)] leading-relaxed">{s.pgWebhookNote}</p>
+                    <CodeBlock filename="registration.completed.json" code={webhookSnippet} {...codeProps} />
+                  </>
+                )}
+
+                {codeTab === "config" && (
+                  <>
+                    <p className="text-sm text-[var(--ink-2)] leading-relaxed">{s.pgConfigNote}</p>
+                    <CodeBlock filename="mezgeb.config.json" code={configSnippet} {...codeProps} />
+                  </>
+                )}
+
+                {codeTab === "events" &&
+                  (events.length === 0 ? (
+                    <div className="rounded-[14px] border border-dashed border-[var(--line-strong)] p-6">
+                      <p className="font-semibold text-[var(--ink)]">{s.pgEventsEmpty}</p>
+                      <p className="mt-1 text-sm text-[var(--ink-2)]">{s.pgEventsEmptyBody}</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setEvents([])}
+                          className="text-[13px] font-medium text-[var(--ink-2)] underline underline-offset-4 cursor-pointer"
+                        >
+                          {s.pgEventsClear}
+                        </button>
+                      </div>
+                      <ol aria-live="polite" className="relative space-y-2">
+                        {events.map((ev, i) => (
+                          <li key={`${ev.timestamp}-${i}`}>
+                            <details className="group rounded-[12px] border border-[var(--line)] open:bg-[var(--stone)]/50">
+                              <summary className="list-none cursor-pointer px-4 min-h-[52px] flex items-center gap-3">
+                                <span
+                                  aria-hidden="true"
+                                  className={`w-2 h-2 rounded-full shrink-0 ${
+                                    ev.name === "registration.completed" ? "bg-[var(--mint-ink)]" : "bg-[var(--line-strong)]"
+                                  }`}
+                                />
+                                <code className="text-[13px] text-[var(--ink)]" style={{ fontFamily: "var(--font-mono)" }}>
+                                  {ev.name}
+                                </code>
+                                {typeof ev.payload.maps_to === "string" && (
+                                  <span className="text-[13px] text-[var(--muted)] truncate">{ev.payload.maps_to}</span>
+                                )}
+                                <span className="ml-auto text-[12px] tabular-nums text-[var(--muted)] shrink-0">{ev.timestamp}</span>
+                                <ChevronRight
+                                  size={16}
+                                  strokeWidth={1.75}
+                                  aria-hidden="true"
+                                  className="text-[var(--muted)] group-open:rotate-90 transition-transform shrink-0"
+                                />
+                                <span className="sr-only">{s.pgEventView}</span>
+                              </summary>
+                              <pre
+                                tabIndex={0}
+                                className="mx-4 mb-4 p-3 rounded-[8px] bg-[var(--paper)] border border-[var(--line)] text-[12px] leading-relaxed text-[var(--ink)] overflow-x-auto"
+                                style={{ fontFamily: "var(--font-mono)" }}
+                              >
+                                <code>{JSON.stringify(ev.payload, null, 2)}</code>
+                              </pre>
+                            </details>
+                          </li>
+                        ))}
+                      </ol>
+                    </>
+                  ))}
+              </div>
+            </section>
           </div>
         </div>
-      </section>
-
-      <AccessibleDialog
-        open={testOpen}
-        onClose={() => setTestOpen(false)}
-        title={selectedTemplate.name[lang]}
-        maxWidthClass="max-w-2xl"
-      >
-        <MezgebWidget
-          template={selectedTemplate}
-          aiEnabled={false}
-          offline={false}
-          accentColor={validAccent}
-          platformName={siteKey}
-          storageKey="mezgeb_playground_test"
-          onComplete={(res) => {
-            setTestResult(res);
-          }}
-        />
-      </AccessibleDialog>
-    </Layout>
-  );
-}
-
-function CodeBlockWithCopy({
-  id,
-  title,
-  code,
-  copiedId,
-  onCopy,
-}: {
-  id: string;
-  title: string;
-  code: string;
-  copiedId: string | null;
-  onCopy: (id: string, code: string) => void;
-}) {
-  const { t } = useI18n();
-  const isCopied = copiedId === id;
-
-  return (
-    <div className="rounded-xl bg-[#161616] text-white overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-white/10 flex items-center justify-between text-xs text-[#9B9B9B]">
-        <span className="font-mono">{title}</span>
-        <button
-          type="button"
-          onClick={() => onCopy(id, code)}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/10 text-white hover:bg-white/20 text-xs font-medium"
-        >
-          <CopyIcon size={12} />
-          <span>{isCopied ? t("copiedButton") : t("copyButton")}</span>
-        </button>
       </div>
-      <pre className="p-4 text-xs font-mono leading-relaxed overflow-x-auto text-[#E4F2EC]">
-        <code>{code}</code>
-      </pre>
-    </div>
+    </Layout>
   );
 }

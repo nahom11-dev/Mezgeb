@@ -1,6 +1,7 @@
 import { Lang } from "./i18n";
 import { MezgebTemplate, TemplateWarning } from "./templates/types";
 import { validateTemplate } from "./templates/validate";
+import { apiUrl } from "./lib/apiBase";
 
 const AI_TIMEOUT_MS = 8000;
 const VOICE_TIMEOUT_MS = 15000;
@@ -9,7 +10,7 @@ async function fetchWithTimeout(url: string, body: unknown, timeoutMs = AI_TIMEO
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, {
+    return await fetch(apiUrl(url), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -25,13 +26,31 @@ export interface ServerCapabilities {
   smartHelp: boolean;
   skillsAi: boolean;
   simplifyAi: boolean;
+  /** Who transcribes voice answers on this server (named next to the microphone). */
+  voiceProvider?: VoiceProvider | null;
+  /** Per interface language: who transcribes voice answers (null = voice off for that language). */
+  voiceProviders?: Record<Lang, VoiceProvider | null>;
+  /** Per language: who reads text aloud on the server (null = the browser's own voice). */
+  readAloudProviders?: Record<Lang, ReadAloudProvider | null>;
+}
+
+export type VoiceProvider = "addis" | "elevenlabs" | "gemini";
+export type ReadAloudProvider = "addis" | "elevenlabs";
+
+export const PROVIDER_NAMES: Record<VoiceProvider, string> = { addis: "Addis AI", elevenlabs: "ElevenLabs", gemini: "Gemini" };
+
+function asVoiceProvider(v: unknown): VoiceProvider | null {
+  return v === "addis" || v === "elevenlabs" || v === "gemini" ? v : null;
+}
+function asReadAloudProvider(v: unknown): ReadAloudProvider | null {
+  return v === "addis" || v === "elevenlabs" ? v : null;
 }
 
 export async function getCapabilities(): Promise<ServerCapabilities> {
   try {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 4000);
-    const res = await fetch("/api/capabilities", { signal: controller.signal });
+    const res = await fetch(apiUrl("/api/capabilities"), { signal: controller.signal });
     window.clearTimeout(timer);
     if (!res.ok) {
       return { voice: false, smartHelp: false, skillsAi: false, simplifyAi: false };
@@ -42,9 +61,40 @@ export async function getCapabilities(): Promise<ServerCapabilities> {
       smartHelp: Boolean(data.smartHelp),
       skillsAi: Boolean(data.skillsAi),
       simplifyAi: Boolean(data.simplifyAi),
+      voiceProvider: asVoiceProvider(data.voiceProvider),
+      voiceProviders: data.voiceProviders
+        ? { am: asVoiceProvider(data.voiceProviders.am), en: asVoiceProvider(data.voiceProviders.en) }
+        : undefined,
+      readAloudProviders: data.readAloudProviders
+        ? { am: asReadAloudProvider(data.readAloudProviders.am), en: asReadAloudProvider(data.readAloudProviders.en) }
+        : undefined,
     };
   } catch {
     return { voice: false, smartHelp: false, skillsAi: false, simplifyAi: false };
+  }
+}
+
+/** Server read-aloud (Addis AI for Amharic, ElevenLabs for English): MP3 for template text, or null on any failure. */
+export async function fetchReadAloudAudio(text: string, lang: Lang, signal?: AbortSignal): Promise<Blob | null> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 12000);
+  const onAbort = () => controller.abort();
+  signal?.addEventListener("abort", onAbort);
+  try {
+    const res = await fetch(apiUrl("/api/tts"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, lang }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return blob.size > 0 ? blob : null;
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
   }
 }
 
