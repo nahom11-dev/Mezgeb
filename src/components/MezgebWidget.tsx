@@ -251,6 +251,9 @@ export function MezgebWidget({
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recordTimerRef = useRef<number | null>(null);
   const textInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  // Heading of whichever screen is showing (step, review, "registered", success) — focus target on screen change
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const didMountRef = useRef(false);
 
   // Smart Help (Alt+H) - always available
   const [helpOpen, setHelpOpen] = useState(false);
@@ -448,6 +451,19 @@ export function MezgebWidget({
     }
     audioElRef.current?.pause();
   }, [stepIndex]);
+
+  // Move focus to the new screen's heading so keyboard and screen-reader users start there (WCAG 2.4.3).
+  // Skipped on first render so an embedded widget never takes focus when the host page loads.
+  const screenKey = completedState ? "done" : nextScreenState ? "next" : `step-${stepIndex}`;
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    if (readOnly || singleQuestionMode || ephemeralPreview) return;
+    const timer = window.setTimeout(() => headingRef.current?.focus(), 30);
+    return () => window.clearTimeout(timer);
+  }, [screenKey, readOnly, singleQuestionMode, ephemeralPreview]);
 
   // Help panel Escape & focus management (B4)
   useEffect(() => {
@@ -1085,7 +1101,7 @@ export function MezgebWidget({
               <CheckIcon size={22} />
             </div>
             <div className="space-y-2">
-              <h2 className="text-2xl font-bold text-[#111111]">{t("widgetNextScreenTitle")}</h2>
+              <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-bold text-[#111111] focus:outline-none">{t("widgetNextScreenTitle")}</h2>
               <p className="text-base text-[#6B6B6B] leading-relaxed">{t("widgetNextScreenBody")}</p>
             </div>
           </div>
@@ -1125,7 +1141,7 @@ export function MezgebWidget({
             <CheckIcon size={22} />
           </div>
           <div className="space-y-2">
-            <h2 className="text-2xl font-bold text-[#111111]">
+            <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-bold text-[#111111] focus:outline-none">
               {completedState.queuedOffline ? t("widgetOfflineQueuedTitle") : t("widgetSuccessTitle")}
             </h2>
             <p className="text-[#6B6B6B] text-base leading-relaxed">{t("widgetSuccessBody")}</p>
@@ -1541,7 +1557,7 @@ export function MezgebWidget({
                 <QuestionIcon name={currentQuestion.icon} size={20} />
               </div>
               <div className="space-y-1">
-                <h2 className="text-xl md:text-2xl font-semibold text-[#111111] tracking-tight">
+                <h2 ref={headingRef} tabIndex={-1} className="text-xl md:text-2xl font-semibold text-[#111111] tracking-tight focus:outline-none">
                   {primaryLabel}
                 </h2>
                 {secondaryLabel && secondaryLabel !== primaryLabel && (
@@ -2565,7 +2581,7 @@ export function MezgebWidget({
         /* REVIEW AND CONFIRM STEP */
         <div className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-xl md:text-2xl font-semibold text-[#111111]">{t("widgetReviewTitle")}</h2>
+            <h2 ref={headingRef} tabIndex={-1} className="text-xl md:text-2xl font-semibold text-[#111111] focus:outline-none">{t("widgetReviewTitle")}</h2>
             {!readOnly && !ephemeralPreview && (
               <button
                 type="button"
