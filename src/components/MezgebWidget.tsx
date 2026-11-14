@@ -27,6 +27,7 @@ import {
   upsertPartnerSession,
 } from "../lib/partnerSync";
 import { saveCompletedLearnerProfile } from "../lib/profileStore";
+import { createRegistration } from "../lib/registrations";
 import { safeGetStorage, safeRemoveStorage, safeSetStorage } from "../lib/storage";
 import {
   buildCompletedProfile,
@@ -89,6 +90,10 @@ interface MezgebWidgetProps {
   onReset?: () => void;
   /** "widget" (embeds): Alt+H only when focus is inside the widget, so it never fires elsewhere on the host page. */
   shortcutScope?: "window" | "widget";
+  /** Publishable key of the platform; the server ties the one-time token to it. */
+  siteKey?: string;
+  /** false (embeds): don't keep the completed profile on this device (it lives in the host site's storage). */
+  persistProfile?: boolean;
 }
 
 function formatPhoneGrouped(raw: string): string {
@@ -161,6 +166,8 @@ export function MezgebWidget({
   onOutboxUpdated,
   onReset,
   shortcutScope = "window",
+  siteKey = "pk_demo_mezgeb",
+  persistProfile = true,
 }: MezgebWidgetProps) {
   const { lang, setLang, t } = useI18n();
   const { announce } = useLiveAnnouncer();
@@ -902,10 +909,20 @@ export function MezgebWidget({
       answers,
       template: safeTemplate,
     });
-    const token = `mzg_tok_${Math.random().toString(16).slice(2, 10)}`;
-    const isActuallyOffline = offline || (typeof navigator !== "undefined" && !navigator.onLine);
+    let isActuallyOffline = offline || (typeof navigator !== "undefined" && !navigator.onLine);
+    // Real one-time token from the Mezgeb server; previews never contact the server.
+    let token = "";
+    if (singleQuestionMode || ephemeralPreview) {
+      token = "mzg_tok_preview";
+    } else if (!isActuallyOffline) {
+      try {
+        token = await createRegistration(siteKey, profile);
+      } catch {
+        isActuallyOffline = true; // server unreachable: queue it like an offline sign-up
+      }
+    }
 
-    if (!singleQuestionMode && !ephemeralPreview) {
+    if (!singleQuestionMode && !ephemeralPreview && persistProfile) {
       saveCompletedLearnerProfile({
         profile,
         rawAnswers: answers,
@@ -924,6 +941,7 @@ export function MezgebWidget({
         createdAt: new Date().toISOString(),
         profile,
         supportShared,
+        siteKey,
       });
       onOutboxUpdated?.();
     }
@@ -939,6 +957,8 @@ export function MezgebWidget({
     } else {
       setNextScreenState(payload);
       announce(t("widgetNextScreenTitle"));
+      // Hand the token to the platform now, not after an extra click (F17)
+      onComplete?.(payload);
     }
   };
 
@@ -1147,7 +1167,6 @@ export function MezgebWidget({
             setNextScreenState(null);
             setCompletedState(done);
             announce(done.queuedOffline ? t("widgetOfflineQueuedTitle") : t("widgetSuccessTitle"));
-            onComplete?.(done);
           }}
           className="mezgeb-btn-primary"
         >

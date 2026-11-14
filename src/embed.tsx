@@ -125,7 +125,10 @@ class MezgebRegister extends HTMLElement {
             platformName={platformName}
             resumeIdParam={resume}
             shortcutScope="widget"
+            siteKey={this.getAttribute("site-key") || ""}
+            persistProfile={false}
             onComplete={(result) => {
+              if (!result.token) return;
               this.dispatchEvent(
                 new CustomEvent("mezgeb:complete", {
                   bubbles: true,

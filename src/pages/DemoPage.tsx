@@ -58,7 +58,7 @@ export function DemoPage() {
         const latest = sent[sent.length - 1];
         setExchangeSteps((prev) => [
           ...prev,
-          `Outbox flushed on reconnect: token ${latest.token} exchanged with server`,
+          `Outbox flushed on reconnect: one-time token issued (${latest.token.slice(0, 14)}…)`,
         ]);
         setExchangedProfile(latest.profile);
       }
@@ -87,21 +87,30 @@ export function DemoPage() {
       return;
     }
 
-    const steps = [
-      `1. Page received token ${result.token}`,
-      `2. Server called POST /v1/registrations/exchange with its secret key`,
-      `3. Profile returned (support_shared: ${result.supportShared})`,
-      `4. Learnhub created the account`,
-    ];
-
-    steps.forEach((stepText, idx) => {
-      window.setTimeout(() => {
-        setExchangeSteps((prev) => [...prev, stepText]);
-        if (idx === 2) {
-          setExchangedProfile(result.profile);
+    // Real exchange: the page only has the one-time token; the server swaps it for the profile.
+    setExchangeSteps([
+      `1. Page received a one-time token (${result.token.slice(0, 14)}…), not the profile`,
+      `2. Learnhub's server calls POST /v1/registrations/exchange with its secret key`,
+    ]);
+    fetch("/api/demo/exchange", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: result.token }),
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          setExchangeSteps((prev) => [
+            ...prev,
+            `3. Mezgeb returned the confirmed profile (support_shared: ${String(data.profile?.support_shared ?? result.supportShared)})`,
+            `4. Learnhub created the account. The token is now used up: a second exchange is refused.`,
+          ]);
+          setExchangedProfile(data.profile ?? null);
+        } else {
+          setExchangeSteps((prev) => [...prev, `3. Exchange refused (HTTP ${res.status}): ${data.error ?? "unknown error"}`]);
         }
-      }, (idx + 1) * 420);
-    });
+      })
+      .catch(() => setExchangeSteps((prev) => [...prev, "3. Could not reach the Mezgeb server"]));
   };
 
   const handleReset = () => {
