@@ -19,6 +19,13 @@ export function JobsPage() {
   const { announce } = useLiveAnnouncer();
 
   const [activeTab, setActiveTab] = useState<"seeker" | "employer">("seeker");
+  const onTabKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const next = e.key === "Home" ? "seeker" : e.key === "End" ? "employer" : activeTab === "seeker" ? "employer" : "seeker";
+    setActiveTab(next);
+    document.getElementById(`jobs-tab-${next}`)?.focus();
+  };
 
   // Pre-populate private filters from session-stored support needs if present
   const [selectedFilters, setSelectedFilters] = useState<string[]>(() => {
@@ -67,11 +74,22 @@ export function JobsPage() {
       : [];
 
     const isRemote = location.toLowerCase().includes("remote") || location.includes("ርቀት");
+    const benefitLabels = accommodations.map(getAccomLabel);
+    // Google for Jobs requires title, description, datePosted, hiringOrganization and jobLocation.
+    const description = [
+      `${title} — ${company}, ${location}.`,
+      benefitLabels.length ? `Workplace support offered: ${benefitLabels.join("; ")}.` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
 
     const jsonLd: Record<string, unknown> = {
       "@context": "https://schema.org/",
       "@type": "JobPosting",
       title,
+      description,
+      datePosted: new Date().toISOString().slice(0, 10),
+      inLanguage: lang,
       hiringOrganization: {
         "@type": "Organization",
         name: company,
@@ -89,8 +107,7 @@ export function JobsPage() {
             },
           }),
       ...(contact ? { applicationContact: { "@type": "ContactPoint", name: contact } } : {}),
-      jobBenefits: accommodations,
-      mezgebAccommodations: accommodations,
+      ...(benefitLabels.length ? { jobBenefits: benefitLabels.join("; ") } : {}),
     };
 
     setJobPostingJsonLd(jsonLd);
@@ -129,7 +146,11 @@ export function JobsPage() {
               <button
                 type="button"
                 role="tab"
+                id="jobs-tab-seeker"
+                aria-controls="jobs-panel-seeker"
                 aria-selected={activeTab === "seeker"}
+                tabIndex={activeTab === "seeker" ? 0 : -1}
+                onKeyDown={onTabKeyDown}
                 onClick={() => setActiveTab("seeker")}
                 className={`px-4 min-h-[40px] rounded-lg text-sm font-semibold transition-colors ${
                   activeTab === "seeker" ? "bg-[#111111] text-white" : "text-[#6B6B6B] hover:text-[#111111]"
@@ -140,7 +161,11 @@ export function JobsPage() {
               <button
                 type="button"
                 role="tab"
+                id="jobs-tab-employer"
+                aria-controls="jobs-panel-employer"
                 aria-selected={activeTab === "employer"}
+                tabIndex={activeTab === "employer" ? 0 : -1}
+                onKeyDown={onTabKeyDown}
                 onClick={() => setActiveTab("employer")}
                 className={`px-4 min-h-[40px] rounded-lg text-sm font-semibold transition-colors ${
                   activeTab === "employer" ? "bg-[#111111] text-white" : "text-[#6B6B6B] hover:text-[#111111]"
@@ -152,7 +177,7 @@ export function JobsPage() {
           </div>
 
           {activeTab === "seeker" ? (
-            <div className="space-y-8">
+            <div className="space-y-8" role="tabpanel" id="jobs-panel-seeker" aria-labelledby="jobs-tab-seeker">
               {/* Private filter panel */}
               <div className="mezgeb-card p-6 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -254,7 +279,12 @@ export function JobsPage() {
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            <div
+              className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start"
+              role="tabpanel"
+              id="jobs-panel-employer"
+              aria-labelledby="jobs-tab-employer"
+            >
               <div className="lg:col-span-7 space-y-4">
                 <p className="text-sm text-[#6B6B6B]">{t("jobsEmployerIntro")}</p>
                 <MezgebWidget

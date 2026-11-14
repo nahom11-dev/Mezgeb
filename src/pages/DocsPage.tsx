@@ -288,7 +288,7 @@ docker compose --profile full up -d`,
         id: "schema-org",
         heading: "Structured accommodations for private job filtering",
         body: [
-          "Employers declare offered accommodations in /jobs ('For employers'). Mezgeb publishes them inside standard JSON-LD (jobBenefits and mezgebAccommodations) so candidates can filter privately without disclosing their own needs before applying.",
+          "Employers declare offered accommodations in /jobs ('For employers'). Mezgeb publishes them as standard schema.org JSON-LD (jobBenefits, plus the title, description, datePosted, hiringOrganization and jobLocation that Google for Jobs requires) so candidates can filter privately without disclosing their own needs before applying.",
         ],
         code: {
           title: "jobposting.jsonld",
@@ -296,9 +296,15 @@ docker compose --profile full up -d`,
   "@context": "https://schema.org/",
   "@type": "JobPosting",
   "title": "Junior data clerk",
+  "description": "Junior data clerk — Example Logistics, Addis Ababa. Workplace support offered: Screen reader friendly software; Flexible hours.",
+  "datePosted": "2026-11-15",
+  "inLanguage": "en",
   "hiringOrganization": { "@type": "Organization", "name": "Example Logistics" },
-  "jobBenefits": ["screen_reader", "extra_time", "flexible_hours"],
-  "mezgebAccommodations": ["screen_reader", "extra_time", "flexible_hours"]
+  "jobLocation": {
+    "@type": "Place",
+    "address": { "@type": "PostalAddress", "addressLocality": "Addis Ababa", "addressCountry": "ET" }
+  },
+  "jobBenefits": "Screen reader friendly software; Flexible hours"
 }`,
         },
       },
