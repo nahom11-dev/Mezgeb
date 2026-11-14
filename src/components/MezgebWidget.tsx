@@ -1383,6 +1383,7 @@ export function MezgebWidget({
             <button
               type="button"
               onClick={() => speakText(errors.map((e) => e.message).join(". "), lang)}
+              aria-label={`${t("widgetReadAloud")}: ${t("widgetErrorSummaryTitle").replace(/[:፦]\s*$/, "")}`}
               className="inline-flex items-center gap-1 px-2.5 min-h-[32px] rounded-md border border-red-300 bg-white text-xs font-medium text-red-900"
             >
               <VolumeIcon size={13} />
@@ -2638,6 +2639,7 @@ export function MezgebWidget({
                       <button
                         type="button"
                         onClick={() => setStepIndex(idx)}
+                        aria-label={`${t("widgetChange")}: ${q.label[lang]}`}
                         className="text-xs font-semibold text-[#6A4FC4] underline min-h-[36px] px-2"
                       >
                         {t("widgetChange")}
