@@ -1114,12 +1114,19 @@ export function MezgebWidget({
       return;
     }
     setSmsPhoneError("");
-    const resumeId = Math.random().toString(36).slice(2, 10);
+    // Random code only (no personal data); crypto-strength so links can't be guessed.
+    const bytes = new Uint8Array(8);
+    crypto.getRandomValues(bytes);
+    const resumeId = Array.from(bytes, (b) => (b % 36).toString(36)).join("") + Date.now().toString(36).slice(-2);
     const sanitized = stripSupportFromAnswers({ ...answers, phone: normalizePhoneDigits(candidatePhone) });
     if (!ephemeralPreview) {
       safeSetStorage(`mezgeb_resume_${resumeId}`, JSON.stringify({ stepIndex, answers: sanitized }));
     }
-    setSmsGeneratedLink(`${window.location.origin}/demo?resume=${resumeId}`);
+    // Back to the page the learner is on (works when embedded on any site), keeping its other parameters.
+    const link = new URL(window.location.href);
+    link.hash = "";
+    link.searchParams.set("resume", resumeId);
+    setSmsGeneratedLink(link.toString());
   };
 
   if (!validation.valid && safeTemplate.questions.length === 0) {
