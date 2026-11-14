@@ -2486,12 +2486,15 @@ export function MezgebWidget({
                   <button
                     type="button"
                     onClick={handleExtractSkills}
+                    aria-describedby={`${widgetId}-skills-ai-notice`}
                     disabled={extractingSkills || !String(answers.work_story ?? "").trim()}
                     className="mezgeb-btn-secondary text-sm"
                   >
                     {extractingSkills ? t("widgetSkillsExtracting") : t("widgetSkillsExtractBtn")}
                   </button>
-                  <span className="text-xs text-[#6B6B6B]">{t("cloudAiNotice")}</span>
+                  <span id={`${widgetId}-skills-ai-notice`} className="text-xs text-[#6B6B6B]">
+                    {t("widgetSkillsAiNotice")} {t("cloudAiNotice")}
+                  </span>
                 </div>
               )}
 
