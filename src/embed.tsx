@@ -82,7 +82,7 @@ function InitialLang({ lang }: { lang: Lang }) {
 }
 
 class MezgebRegister extends HTMLElement {
-  static observedAttributes = ["lang", "ai", "template", "site-key", "platform-name", "api-base"];
+  static observedAttributes = ["lang", "ai", "template", "site-key", "platform-name", "api-base", "job-id", "job-title"];
   private root: Root | null = null;
   private detachOutboxSync: (() => void) | null = null;
   private outboxFlushNotice: { outboxId: string; token: string } | null = null;
@@ -132,6 +132,9 @@ class MezgebRegister extends HTMLElement {
     const key = (this.getAttribute("template") || "learning-platform") as keyof typeof TEMPLATES;
     const template = TEMPLATES[key] ?? LEARNING_PLATFORM_TEMPLATE;
     const platformName = this.getAttribute("platform-name") || undefined;
+    const jobId = this.getAttribute("job-id") || undefined;
+    const jobTitle = this.getAttribute("job-title") || undefined;
+    const offerRememberSupport = key === "job-application" || key === "job-seeker";
     const resume = new URLSearchParams(window.location.search).get("resume");
     const outboxFlushNotice = this.outboxFlushNotice;
 
@@ -147,15 +150,38 @@ class MezgebRegister extends HTMLElement {
             resumeIdParam={resume}
             shortcutScope="widget"
             siteKey={this.getAttribute("site-key") || ""}
+            jobId={jobId}
+            jobTitle={jobTitle}
+            offerRememberSupportLocal={offerRememberSupport}
             persistProfile={false}
             outboxFlushNotice={outboxFlushNotice}
+            onEvent={(event) => {
+              if (event.name === "step.completed") {
+                this.dispatchEvent(
+                  new CustomEvent("mezgeb:step", {
+                    bubbles: true,
+                    composed: true,
+                    detail: event.payload,
+                  })
+                );
+              }
+            }}
             onComplete={(result) => {
               if (!result.token) return;
+              if (result.supportToken) {
+                this.dispatchEvent(
+                  new CustomEvent("mezgeb:support", {
+                    bubbles: true,
+                    composed: true,
+                    detail: { token: result.supportToken },
+                  })
+                );
+              }
               this.dispatchEvent(
                 new CustomEvent("mezgeb:complete", {
                   bubbles: true,
                   composed: true,
-                  detail: { token: result.token },
+                  detail: { token: result.token, ...(result.outboxId ? { queued: true, outboxId: result.outboxId } : {}) },
                 })
               );
             }}

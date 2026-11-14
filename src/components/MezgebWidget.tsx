@@ -47,7 +47,8 @@ import {
   resolveResumeStep,
 } from "../lib/resumeStep";
 import { subscribePartnerSync, upsertPartnerSession } from "../lib/partnerSync";
-import { createRegistration } from "../lib/registrations";
+import { createRegistration, createSupportToken } from "../lib/registrations";
+import { clearLocalSupportNeeds, saveLocalSupportNeeds } from "../lib/localSupportMemory";
 import { getRecordedAudioUrlFromManifest, loadAudioManifest, type AudioManifest } from "../lib/recordedAudio";
 import { saveCompletedLearnerProfile } from "../lib/profileStore";
 import { safeGetStorage, safeRemoveStorage, safeSetStorage } from "../lib/storage";
@@ -181,9 +182,11 @@ interface MezgebWidgetProps {
   onEvent?: (event: MezgebWidgetEvent) => void;
   onComplete?: (result: {
     token: string;
+    supportToken?: string;
     profile: Record<string, unknown>;
     supportShared: boolean;
     queuedOffline?: boolean;
+    outboxId?: string;
   }) => void;
   onOutboxUpdated?: () => void;
   /** Set when embed flushes a queued registration (outbox id + token). */
@@ -195,6 +198,10 @@ interface MezgebWidgetProps {
   siteKey?: string;
   /** false (embeds): don't keep the completed profile on this device. */
   persistProfile?: boolean;
+  jobId?: string;
+  jobTitle?: string;
+  /** Show “remember support for job filtering” on the support step (Savanna jobs demo). */
+  offerRememberSupportLocal?: boolean;
 }
 
 function formatPhoneGrouped(raw: string): string {
@@ -279,6 +286,9 @@ export function MezgebWidget({
   shortcutScope = "window",
   siteKey = "",
   persistProfile = true,
+  jobId,
+  jobTitle,
+  offerRememberSupportLocal = false,
 }: MezgebWidgetProps) {
   const { lang: siteLang, setLang, t } = useI18n();
   const lang: Lang = builderCanvas ? builderCanvas.editingLang : siteLang;
@@ -1320,19 +1330,34 @@ export function MezgebWidget({
   };
 
   const handleComplete = async () => {
-    const { profile, supportShared } = buildCompletedProfile({
+    const { profile, support, supportShared } = buildCompletedProfile({
       answers,
       template: safeTemplate,
     });
+    if (jobId) profile.job_id = jobId;
+    if (jobTitle) profile.job_title = jobTitle;
+    if (offerRememberSupportLocal && typeof window !== "undefined") {
+      if (answers.remember_support_for_jobs === true && support?.needs?.length) {
+        saveLocalSupportNeeds(support.needs);
+      } else {
+        clearLocalSupportNeeds();
+      }
+    }
     let isActuallyOffline = offline || (typeof navigator !== "undefined" && !navigator.onLine);
     let token = "";
+    let supportToken = "";
     if (singleQuestionMode || ephemeralPreview) {
       token = "mzg_tok_preview";
     } else if (!isActuallyOffline) {
       try {
-        token = siteKey
-          ? await createRegistration(siteKey, profile)
-          : `mzg_tok_${Math.random().toString(16).slice(2, 10)}`;
+        if (siteKey) {
+          token = await createRegistration(siteKey, profile);
+          if (support) {
+            supportToken = await createSupportToken(siteKey, support);
+          }
+        } else {
+          token = `mzg_tok_${Math.random().toString(16).slice(2, 10)}`;
+        }
       } catch {
         isActuallyOffline = true;
       }
@@ -1370,6 +1395,7 @@ export function MezgebWidget({
 
     const payload = {
       token,
+      ...(supportToken ? { supportToken } : {}),
       profile,
       supportShared,
       queuedOffline: isActuallyOffline,
@@ -2043,7 +2069,14 @@ export function MezgebWidget({
         {/* Top bar: platform + Answer Mode switcher + Progress */}
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-sm font-medium text-[var(--ink)]">{effectivePlatformName}</span>
+            <div>
+              <span className="text-sm font-medium text-[var(--ink)]">{effectivePlatformName}</span>
+              {jobTitle ? (
+                <p className="text-sm text-[var(--muted)] mt-0.5">
+                  {t("widgetApplyingForJob", { title: jobTitle })}
+                </p>
+              ) : null}
+            </div>
 
             {!singleQuestionMode && (
               <div className="flex items-center gap-2">
@@ -3321,6 +3354,21 @@ export function MezgebWidget({
                     </button>
                   </div>
                 </div>
+
+                {offerRememberSupportLocal && !readOnly && (
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      id={`${widgetId}-remember-support`}
+                      className="mt-1"
+                      checked={Boolean(answers.remember_support_for_jobs)}
+                      onChange={(e) => updateAnswer("remember_support_for_jobs", e.target.checked)}
+                    />
+                    <label htmlFor={`${widgetId}-remember-support`} className="text-sm text-[var(--ink)]">
+                      {t("widgetRememberSupportJobs")}
+                    </label>
+                  </div>
+                )}
               </div>
             )}
 

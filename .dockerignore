@@ -6,3 +6,5 @@ dist-embed
 !.env.example
 .git
 test-results
+data
+data-test

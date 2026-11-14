@@ -299,7 +299,7 @@ describe("Completed profile builder & showIf rules", () => {
   });
 
   it("includes support_needs only when support_share_platform is true", () => {
-    const { profile, supportShared } = buildCompletedProfile({
+    const { profile, support, supportShared } = buildCompletedProfile({
       answers: {
         language: "en",
         full_name: "Tigist",
@@ -311,7 +311,8 @@ describe("Completed profile builder & showIf rules", () => {
     });
 
     expect(supportShared).toBe(true);
-    expect(profile.support_needs).toEqual(["extra_time"]);
+    expect(profile.support_needs).toBeUndefined();
+    expect(support?.needs).toEqual(["extra_time"]);
     expect(profile.id_route).toBe("fayda");
   });
 

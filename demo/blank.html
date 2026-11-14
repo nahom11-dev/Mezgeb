@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mezgeb blank demo</title>
+</head>
+<body>
+  <main id="main">
+    <h1>Blank sign-up page</h1>
+    <script type="module" src="/v1/mezgeb.js"></script>
+    <mezgeb-register site-key="pk_sample_kelem" template="learning-platform" lang="am" platform-name="Blank demo"></mezgeb-register>
+  </main>
+  <script>
+    document.querySelector("mezgeb-register")?.addEventListener("mezgeb:complete", (e) => {
+      const el = document.createElement("p");
+      el.textContent = "Registration token received (check the browser console).";
+      document.getElementById("main")?.appendChild(el);
+      console.log("mezgeb:complete", e.detail);
+    });
+  </script>
+</body>
+</html>

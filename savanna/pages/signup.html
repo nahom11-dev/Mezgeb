@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign up · Savanna demo</title>
+    <link rel="stylesheet" href="../assets/css/application_alx.css" media="all" />
+    <link rel="stylesheet" href="../assets/css/app.css" media="all" />
+  </head>
+  <body class="bg-body-tertiary">
+    <main class="container-lg py-4" id="main">
+      <h1 class="h3">Create your Savanna account</h1>
+      <script type="module" src="/v1/mezgeb.js"></script>
+      <mezgeb-register
+        site-key="pk_sample_savanna"
+        template="learning-platform"
+        lang="am"
+        platform-name="Savanna"
+      ></mezgeb-register>
+    </main>
+    <script>
+      document.querySelector("mezgeb-register")?.addEventListener("mezgeb:complete", (e) => {
+        const note = document.createElement("p");
+        note.className = "mt-3";
+        note.textContent = "Sign-up sent. Your server can store the token with POST /api/v1/learners.";
+        document.getElementById("main")?.appendChild(note);
+        console.log("mezgeb:complete", e.detail);
+      });
+    </script>
+  </body>
+</html>

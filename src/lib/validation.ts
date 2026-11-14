@@ -1,4 +1,5 @@
 import { ScreenSummaryForAi } from "../ai";
+import type { ShareWith, SupportRecord } from "./supportTypes";
 import { MezgebTemplate, TemplateQuestion } from "../templates/types";
 import {
   ethiopianToGregorian,
@@ -72,10 +73,35 @@ export function isQuestionVisible(
   return String(actual ?? "") === String(expected);
 }
 
+export function buildShareWith(answers: Record<string, unknown>): ShareWith {
+  return {
+    platform: Boolean(answers.support_share_platform),
+    employers: Boolean(answers.support_share_employers),
+    partner: Boolean(answers.support_share_partner),
+  };
+}
+
+export function buildSupportRecord(answers: Record<string, unknown>): SupportRecord | null {
+  const needs = Array.isArray(answers.support_needs)
+    ? answers.support_needs.map((n) => String(n)).filter((n) => n && n !== "prefer-not")
+    : [];
+  const shareWith = buildShareWith(answers);
+  const hasShare = shareWith.platform || shareWith.employers || shareWith.partner;
+  if (needs.length === 0 && !hasShare) return null;
+  return { needs, shareWith };
+}
+
+export function profileContainsSupportKey(profile: Record<string, unknown>): string | null {
+  for (const key of Object.keys(profile)) {
+    if (key.toLowerCase().startsWith("support")) return key;
+  }
+  return null;
+}
+
 export function buildCompletedProfile(params: {
   answers: Record<string, unknown>;
   template: MezgebTemplate;
-}): { profile: Record<string, unknown>; supportShared: boolean } {
+}): { profile: Record<string, unknown>; support: SupportRecord | null; supportShared: boolean } {
   const { answers, template } = params;
   const profile: Record<string, unknown> = {};
 
@@ -171,11 +197,7 @@ export function buildCompletedProfile(params: {
     }
   }
 
-  const supportShared = Boolean(answers.support_share_platform);
-  profile.support_shared = supportShared;
-  if (supportShared && Array.isArray(answers.support_needs) && answers.support_needs.length > 0) {
-    profile.support_needs = answers.support_needs;
-  }
-
-  return { profile, supportShared };
+  const support = buildSupportRecord(answers);
+  const supportShared = Boolean(support?.shareWith.platform);
+  return { profile, support, supportShared };
 }

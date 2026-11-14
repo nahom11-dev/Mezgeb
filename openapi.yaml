@@ -18,6 +18,7 @@ tags:
   - name: Platform handoff
   - name: Embed
   - name: AI helpers
+  - name: Level 2 API
 paths:
   /v1/mezgeb.js:
     get:
@@ -245,6 +246,35 @@ paths:
       tags: [AI helpers]
       summary: Suggest skills from the learner's work story (only when the learner asks)
       responses: { "200": { description: "{ skills: [{ name, evidence }] }" }, "503": { $ref: "#/components/responses/Error" } }
+  /api/v1/learners:
+    post:
+      tags: [Level 2 API]
+      summary: Create learner (profile + consent, or registrationToken)
+      security: [{ secretKey: [] }]
+      responses:
+        "201": { description: Created }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/v1/learners/{id}:
+    get:
+      tags: [Level 2 API]
+      security: [{ secretKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Learner }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [Level 2 API]
+      security: [{ secretKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: Deleted }
+  /api/v1/webhooks:
+    post:
+      tags: [Level 2 API]
+      security: [{ secretKey: [] }]
+      responses:
+        "201": { description: Webhook created }
 components:
   securitySchemes:
     secretKey:

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Employer sign-up · Savanna demo</title>
+    <link rel="stylesheet" href="../assets/css/application_alx.css" media="all" />
+    <link rel="stylesheet" href="../assets/css/app.css" media="all" />
+  </head>
+  <body class="bg-body-tertiary">
+    <main class="container-lg py-4" id="main">
+      <h1 class="h3">Post a sample job listing</h1>
+      <p class="text-muted">Fictional employer flow. Completed listings are stored in this browser only.</p>
+      <p><a href="jobs.html">View job board</a></p>
+      <script type="module" src="/v1/mezgeb.js"></script>
+      <mezgeb-register
+        site-key="pk_sample_savanna"
+        template="employer-signup"
+        lang="en"
+        platform-name="Savanna Employers"
+      ></mezgeb-register>
+      <p class="mt-3" id="status" aria-live="polite"></p>
+    </main>
+    <script>
+      const DEMO_JOBS_KEY = "mezgeb-demo:jobs";
+      const el = document.querySelector("mezgeb-register");
+      el?.addEventListener("mezgeb:complete", async (e) => {
+        const token = e.detail?.token;
+        if (!token) return;
+        try {
+          const res = await fetch("/api/sample/registrations/exchange", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ siteKey: "pk_sample_savanna", token }),
+          });
+          const data = await res.json();
+          const profile = data.profile || {};
+          const jobs = JSON.parse(localStorage.getItem(DEMO_JOBS_KEY) || "[]");
+          const entry = {
+            id: `job_emp_${Date.now()}`,
+            title: String(profile.role_title || profile.job_title || "New sample role"),
+            employer: String(profile.company_name || "Sample employer"),
+            location: String(profile.location || "Addis Ababa"),
+            datePosted: new Date().toISOString().slice(0, 10),
+            validThrough: new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10),
+            description: String(profile.summary || "Employer-posted sample listing."),
+            accommodations: Array.isArray(profile.accommodations_offered)
+              ? profile.accommodations_offered
+              : ["flexible_hours", "remote_option"],
+          };
+          jobs.push(entry);
+          localStorage.setItem(DEMO_JOBS_KEY, JSON.stringify(jobs));
+          document.getElementById("status").textContent =
+            "Listing saved on this device. Open the jobs page to see it.";
+        } catch {
+          document.getElementById("status").textContent = "Could not exchange token for demo storage.";
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -103,6 +103,51 @@ If the chosen service fails, the learner is asked to type instead; the recording
 2. Use **Finish later by SMS link** and confirm the URL points back to that sample site's `onboarding.html?resume=…`.
 3. Copy the two-line embed snippet from the home page into your own HTML and exchange the token server-side (see README install section above).
 
+## Install, Level 2
+
+Level 2 stores learners in SQLite under `DATA_DIR` (default `./data`) and exposes `/api/v1/*` with Bearer `sk_…`. Interactive docs: **http://localhost:3000/docs** after `npm run dev`.
+
+```bash
+# 1) Create a learner
+curl -s -X POST http://localhost:3000/api/v1/learners \
+  -H "Authorization: Bearer sk_sample_kelem" \
+  -H "Content-Type: application/json" \
+  -d '{"profile":{"full_name":"Abebe","phone":"0911223344","preferred_language":"am"},"consent":{"accepted":true,"textVersion":"v1","language":"am"}}'
+
+# 2) Put support separately
+curl -s -X PUT http://localhost:3000/api/v1/learners/lrn_REPLACE/support \
+  -H "Authorization: Bearer sk_sample_kelem" \
+  -H "Content-Type: application/json" \
+  -d '{"needs":["screen_reader"],"shareWith":{"platform":true,"employers":false,"partner":false}}'
+
+# 3) After the browser finishes sign-up, exchange the token server-side, then:
+curl -s -X POST http://localhost:3000/api/v1/learners \
+  -H "Authorization: Bearer sk_sample_kelem" \
+  -H "Content-Type: application/json" \
+  -d '{"registrationToken":"mzg_tok_…","consent":{"accepted":true}}'
+```
+
+Sample webhook receiver: `node examples/webhook-receiver.js`.
+
+## Install, Level 3
+
+Regenerate static JobPosting JSON-LD in `savanna/pages/jobs.html`:
+
+```bash
+npm run build:jobs-jsonld
+```
+
+Runtime employer-added jobs still inject JSON-LD in `savanna/assets/js/jobs-demo.js`.
+
+## How LTI 1.3 would connect
+
+A learning platform (LMS) would register Mezgeb as an LTI tool with a platform client id and JWKS endpoint. The LMS launches Savanna or a job-application path via LTI Resource Link Request; Mezgeb receives `sub` (stable platform user id) and optional role claims without handling LMS passwords. The platform's server exchanges `registrationToken` from the embed using its `sk_…` and stores the learner in `/api/v1/learners`, keyed by platform id + LTI `sub`. Deep linking could pass `job-id` / course context as custom LTI claims mapped to embed attributes. Grade passback is out of scope for this hackathon; the hook point is the existing `registration.completed` webhook when a learner finishes in the tool.
+
+## Finished and not finished
+
+- **Done:** Level 2 `/api/v1` (learners, support split, webhooks, SQLite/JSON store), Swagger at `/docs`, Savanna jobs gateway with local support memory, JobPosting JSON-LD build script, audit fixes 11–12 (split tokens and events).
+- **Not done / partial:** Full `mode="edit"` profile updates (fix 13) — `savanna/pages/profile.html` is a stub; schema.org validator not run in CI; Playwright axe sweep is manual unless `@axe-core/cli` is installed locally.
+
 ## Honesty rules
 
 - All company names (`Learnhub`), people (`Hana`), partners, and job listings in demos are clearly marked sample data.

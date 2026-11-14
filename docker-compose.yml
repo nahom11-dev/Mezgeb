@@ -17,4 +17,7 @@ services:
       - MEZGEB_SITE_KEYS=${MEZGEB_SITE_KEYS:-}
       - MEZGEB_ALLOWED_ORIGINS=${MEZGEB_ALLOWED_ORIGINS:-}
       - MEZGEB_TOKEN_TTL_MS=${MEZGEB_TOKEN_TTL_MS:-300000}
+      - DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
     restart: unless-stopped

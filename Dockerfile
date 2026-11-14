@@ -10,5 +10,6 @@ COPY . .
 RUN npm run build:embed
 
 ENV PORT=3000
+ENV DATA_DIR=/app/data
 EXPOSE 3000
 CMD ["npx", "tsx", "server.ts", "--production"]
