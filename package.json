@@ -6,10 +6,9 @@
   "scripts": {
     "dev": "tsx server.ts",
     "start": "tsx server.ts --production",
-    "build": "vite build",
+    "build": "npm run build:embed",
     "build:embed": "vite build --config vite.embed.config.ts",
-    "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "rm -rf dist-embed",
     "lint": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -20,10 +19,8 @@
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
-    "react-router-dom": "^7.18.5",
     "vite": "^8.3.0"
   },
   "devDependencies": {

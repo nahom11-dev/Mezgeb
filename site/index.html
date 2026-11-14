@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mezgeb — accessible sign-up for any website</title>
+  <!--
+  Links that must exist before submission (built in later tasks):
+  - /demo/blank.html
+  - /savanna/pages/signup.html
+  - /savanna/pages/profile.html
+  - /savanna/pages/jobs.html
+  - /docs (API reference / Swagger)
+  - CONFORMANCE.md in the repository (accessibility conformance report)
+  -->
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, "Noto Sans Ethiopic", sans-serif;
+      font-size: 1.125rem;
+      line-height: 1.6;
+      color: #1a1a1a;
+      background: #fff;
+    }
+    :lang(am) { line-height: 1.7; }
+    .wrap { max-width: 45rem; margin: 0 auto; padding: 0 1.25rem 3rem; }
+    .skip {
+      position: absolute;
+      left: -9999px;
+      top: 0;
+      padding: 0.5rem 1rem;
+      background: #fff;
+      color: #0b57d0;
+      text-decoration: underline;
+      z-index: 1;
+    }
+    .skip:focus { left: 1.25rem; top: 0.5rem; }
+    a { color: #0b57d0; text-decoration: underline; }
+    a:focus-visible {
+      outline: 3px solid #0b57d0;
+      outline-offset: 2px;
+    }
+    header { padding: 2rem 0 1.5rem; }
+    .brand { font-size: 1.5rem; font-weight: 700; margin: 0; display: inline; }
+    .tag { font-size: 0.875rem; color: #1a1a1a; margin: 0.5rem 0 0; }
+    h1 { font-size: 1.75rem; line-height: 1.3; margin: 0 0 1rem; font-weight: 700; }
+    h2 { font-size: 1.375rem; margin: 2.5rem 0 1rem; font-weight: 700; }
+    p { margin: 0 0 1rem; }
+  ul { list-style: none; padding: 0; margin: 0; }
+    li { margin: 0 0 1.75rem; }
+    .try-link {
+      display: inline-block;
+      min-height: 2.75rem;
+      padding: 0.35rem 0;
+      font-weight: 600;
+    }
+    .try-desc { margin: 0.25rem 0 0; font-size: 1rem; }
+    pre {
+      margin: 1rem 0;
+      padding: 1rem;
+      background: #f6f6f6;
+      border: 1px solid #d0d0d0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+    }
+    code { font-family: ui-monospace, "Cascadia Code", monospace; }
+    footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #d0d0d0; font-size: 0.9375rem; }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to main content</a>
+  <div class="wrap">
+    <header>
+      <p class="brand">Mezgeb</p>
+      <p class="tag">Digital Bridge Accessibility Hackathon 2026 · Track 1: Accessible onboarding</p>
+    </header>
+
+    <main id="main">
+      <h1>Accessible sign-up any website can add with one script tag</h1>
+      <p>Mezgeb is a sign-up module that asks one clear question per screen, with voice or typing and help that never sees what you typed. It is for learners who use a screen reader, cannot read well, have no ID document yet, or are on a slow phone. It works in Amharic and English.</p>
+
+      <h2>Try it</h2>
+      <ul>
+        <li>
+          <a class="try-link" href="/demo/blank.html">Sign-up on a blank page</a>
+          <p class="try-desc">The module on a page with no other styles.</p>
+        </li>
+        <li>
+          <a class="try-link" href="/savanna/pages/signup.html">Sign-up inside Savanna</a>
+          <p class="try-desc">The module added to the real Savanna learner pages.</p>
+        </li>
+        <li>
+          <a class="try-link" href="/savanna/pages/profile.html">Edit a profile</a>
+          <p class="try-desc">The same module in edit mode.</p>
+        </li>
+        <li>
+          <a class="try-link" href="/savanna/pages/jobs.html">Apply for a job</a>
+          <p class="try-desc">The same engine running a job application.</p>
+        </li>
+        <li>
+          <span class="try-link" style="font-weight:600">Sample partner sites</span>
+          <p class="try-desc">
+            <a href="/sample-sites/learning-site/onboarding.html">Kelem Learn</a>,
+            <a href="/sample-sites/jobs-site/onboarding.html">Sira Board</a>,
+            <a href="/sample-sites/programme-site/onboarding.html">Meskot Skills</a>
+            — three different websites using the same script.
+          </p>
+        </li>
+      </ul>
+
+      <h2>Add it to your site</h2>
+      <p>Build <code>mezgeb.js</code> on your Mezgeb server, register a publishable site key, then add two lines to your sign-up page.</p>
+      <pre><code>&lt;script type="module" src="https://YOUR-MEZGEB-SERVER/v1/mezgeb.js"&gt;&lt;/script&gt;
+&lt;mezgeb-register site-key="pk_test_mysite" lang="am" platform-name="My site"&gt;&lt;/mezgeb-register&gt;</code></pre>
+      <p><a href="https://github.com/nahom11-dev/Mezgeb/blob/master/README.md">Full install guide (README)</a></p>
+
+      <h2>For developers</h2>
+      <ul>
+        <li><a class="try-link" href="/docs">API reference (Swagger)</a></li>
+        <li><a class="try-link" href="/openapi.yaml">OpenAPI file</a></li>
+        <li><a class="try-link" href="https://github.com/nahom11-dev/Mezgeb/blob/master/CONFORMANCE.md">Accessibility conformance report</a></li>
+        <li><a class="try-link" href="https://github.com/nahom11-dev/Mezgeb">Source code</a></li>
+      </ul>
+
+      <h2>Team</h2>
+      <p>[Name], [Name], [Name] — co-designer: [Name]</p>
+    </main>
+
+    <footer>
+      <p>[Licence named by ALX] · 2026</p>
+    </footer>
+  </div>
+</body>
+</html>

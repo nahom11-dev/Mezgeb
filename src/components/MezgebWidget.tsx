@@ -76,6 +76,13 @@ import {
 import { QuestionIcon } from "../ui/QuestionIcon";
 import { useLiveAnnouncer } from "./LiveAnnouncer";
 
+function resumeLinkFor(id: string): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set("resume", id);
+  url.hash = "";
+  return url.toString();
+}
+
 export type AnswerMode = "speak" | "type" | "simple";
 
 export type DemoWidgetTriggerType =
@@ -968,7 +975,7 @@ export function MezgebWidget({
     } else if (type === "sms_sent") {
       setSmsOpen(true);
       setSmsPhone("0911234567");
-      setSmsGeneratedLink(`${window.location.origin}/demo?resume=mzg_demo_5`);
+      setSmsGeneratedLink(resumeLinkFor("mzg_demo_5"));
     } else if (type === "restored") {
       const targetStep = Math.min(4, Math.max(0, visibleQuestions.length - 1));
       setStepIndex(targetStep);
@@ -1559,7 +1566,7 @@ export function MezgebWidget({
       const snap = buildProgressSnapshot(stepIndex, vis, sanitized);
       safeSetStorage(`mezgeb_resume_${resumeId}`, JSON.stringify(snap));
     }
-    setSmsGeneratedLink(`${window.location.origin}/demo?resume=${resumeId}`);
+    setSmsGeneratedLink(resumeLinkFor(resumeId));
   };
 
   const handleOpenSavedLink = (e: React.FormEvent) => {

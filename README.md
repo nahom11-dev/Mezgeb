@@ -1,4 +1,4 @@
-# Mezgeb Showcase
+# Mezgeb
 
 Mezgeb (Amharic: መዝገብ, "register") is an accessible sign-up and career onboarding component for training programmes, job boards, and NGOs. Learners can register by typing, speaking Amharic or English, or with a partner organisation beside them—with no time-outs and four flexible ID routes.
 
@@ -14,7 +14,7 @@ Needs Node.js 20 or newer and git.
    ```bash
    ADDIS_API_KEY="your_addis_ai_key"         # Amharic voice answers + Amharic read-aloud (Addis AI)
    ELEVENLABS_API_KEY="your_elevenlabs_key"  # English voice answers + English read-aloud (ElevenLabs, free plan works)
-   GEMINI_API_KEY="your_gemini_key"          # Smart Help, skills, simplify, template builder
+   GEMINI_API_KEY="your_gemini_key"          # Smart Help, skills, simplify
    ```
    See [Voice answers and read-aloud](#voice-answers-and-read-aloud) for how the services are chosen.
 3. Start the development server on port 3000:
@@ -54,18 +54,15 @@ Needs Node.js 20 or newer and git.
 
 The widget renders in a shadow root, so your CSS and Mezgeb's never mix.
 
-## Pages in this showcase
+## Try it locally
 
-- `/` — Product landing page, origin story, feature showcase, integration overview, and FAQ
-- `/demo` — Interactive 9-step learner registration with Developer View, offline outbox, and rehearsal checklist
-- `/jobs` — Sample career view with private support-needs filter, apply-by-voice, and Employer JobPosting JSON-LD generator
-- `/employers/accommodations` — Employer accommodations wizard with JSON-LD preview
-- `/partner` — Simulated partner console for joining a session and confirming identity
-- `/profile` — View and edit the saved learner profile, support-sharing toggles, and device data deletion
-- `/templates` — Four accessible templates plus AI Template Builder and Question Checker
-- `/playground` — Embed code, Node/Python/PHP server exchange snippets, webhook, and Docker Compose self-hosting config
-- `/docs/*` — Developer documentation
-- `/accessibility` — Accessibility statement (WCAG 2.2 AA)
+After `npm run dev` and `npm run build:embed`, open **http://localhost:3000/** for the front page, then:
+
+- http://localhost:3000/sample-sites/learning-site/onboarding.html
+- http://localhost:3000/sample-sites/jobs-site/onboarding.html
+- http://localhost:3000/sample-sites/programme-site/onboarding.html
+
+More demo URLs are linked from the home page (`/demo/*`, `/savanna/*`) as they are added.
 
 ## Voice answers and read-aloud
 
@@ -97,14 +94,14 @@ If the chosen service fails, the learner is asked to type instead; the recording
 
 ## What is simulated vs real
 
-- **Simulated:** SMS "finish later" delivery (the resume link works on the same device only), the Partner Console (`/partner` synced across tabs via `BroadcastChannel`, so only in the same browser), and the sample job listings on `/jobs` (`Learnhub` and `Hana` are sample names).
-- **Real:** The `<mezgeb-register>` embed and the one-time token exchange (tokens are kept in memory, so one server process), accessible one-question-per-screen flow, JDN Ethiopian/Gregorian calendar conversion, WCAG contrast checker, Service Worker + IndexedDB offline outbox, server-side Addis AI speech-to-text and Amharic read-aloud (when `ADDIS_API_KEY` is configured), ElevenLabs English speech-to-text and read-aloud (when `ELEVENLABS_API_KEY` is configured), and server-side Gemini API calls (when `GEMINI_API_KEY` is configured).
+- **Simulated:** SMS "finish later" delivery (the resume link is shown for the learner to copy; it resumes on the **same host page** with `?resume=`).
+- **Real:** The `<mezgeb-register>` embed and one-time token exchange, accessible one-question-per-screen flow, JDN Ethiopian/Gregorian calendar conversion, IndexedDB offline outbox, server-side speech and read-aloud when keys are set, and Gemini helpers when `GEMINI_API_KEY` is configured.
 
-## The three demo moments
+## Hackathon demo flow
 
-1. **Co-designer flow:** Register by keyboard, open Help (`Alt+H`) to see plain-language guidance without exposing typed answers, and choose "Refer me through a partner" without needing a Fayda ID.
-2. **Connection off:** Toggle offline mode, complete a registration, observe it queued in the IndexedDB outbox, and reconnect to watch it send automatically.
-3. **Live install:** Copy the two-line HTML snippet from `/playground` and test the token exchange.
+1. Register on a sample site using only the keyboard; complete sign-up and confirm the host page receives `mezgeb:complete`.
+2. Use **Finish later by SMS link** and confirm the URL points back to that sample site's `onboarding.html?resume=…`.
+3. Copy the two-line embed snippet from the home page into your own HTML and exchange the token server-side (see README install section above).
 
 ## Honesty rules
 

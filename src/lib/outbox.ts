@@ -101,8 +101,6 @@ export function outboxItemsForSite(items: OutboxRegistration[], siteKey: string)
   return items.filter((item) => (item.siteKey ?? "").trim() === key);
 }
 
-export const DEMO_FLUSH_SITE_KEY = "pk_demo_mezgeb";
-
 async function postOutboxItem(item: OutboxRegistration): Promise<FlushedOutboxItem | null> {
   const siteKey = (item.siteKey ?? "").trim();
   if (!siteKey) return null;
@@ -135,24 +133,5 @@ export async function flushOutboxForSite(siteKey: string): Promise<FlushedOutbox
     else if (typeof navigator !== "undefined" && !navigator.onLine) break;
   }
 
-  return sent;
-}
-
-/** Mezgeb demo page: flush queued demo registrations (includes items with no siteKey, legacy). */
-export async function flushOutbox(): Promise<FlushedOutboxItem[]> {
-  const items = await getOutboxItems();
-  const demoItems = items.filter((item) => {
-    const k = (item.siteKey ?? "").trim();
-    return k === "" || k === DEMO_FLUSH_SITE_KEY;
-  });
-  const toSend = demoItems.map((item) =>
-    (item.siteKey ?? "").trim() ? item : { ...item, siteKey: DEMO_FLUSH_SITE_KEY }
-  );
-  const sent: FlushedOutboxItem[] = [];
-  for (const item of toSend) {
-    const result = await postOutboxItem(item);
-    if (result) sent.push(result);
-    else if (typeof navigator !== "undefined" && !navigator.onLine) break;
-  }
   return sent;
 }

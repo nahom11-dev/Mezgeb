@@ -97,7 +97,7 @@ async function synth(lang: "en" | "am", text: string): Promise<Buffer | null> {
   if (lang === "am") {
     const key = process.env.ADDIS_API_KEY?.trim();
     if (!key) return null;
-    const out = await speakWithAddis(text, { apiKey: key, lang: "am" });
+    const out = await speakWithAddis(text, "am", { apiKey: key });
     return out.ok ? out.audio : null;
   }
   const key = process.env.ELEVENLABS_API_KEY?.trim();
