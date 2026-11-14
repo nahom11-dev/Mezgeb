@@ -1919,7 +1919,14 @@ const I18nContext = createContext<I18nContextValue>({
   t: (key) => en[key],
 });
 
-export function I18nProvider({ children }: { children: React.ReactNode }) {
+export function I18nProvider({
+  children,
+  setDocumentLang = true,
+}: {
+  children: React.ReactNode;
+  /** false when embedded: the widget root carries `lang` itself and the host page's <html lang> is left alone. */
+  setDocumentLang?: boolean;
+}) {
   const [lang, setLangState] = useState<Lang>(() => {
     const saved = safeGetStorage("mezgeb_lang").value;
     return saved === "am" ? "am" : "en";
@@ -1931,8 +1938,8 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    document.documentElement.lang = lang;
-  }, [lang]);
+    if (setDocumentLang) document.documentElement.lang = lang;
+  }, [lang, setDocumentLang]);
 
   const t = (key: TranslationKeys, vars?: Record<string, string | number>): string => {
     let str = translations[lang][key] ?? en[key] ?? String(key);
