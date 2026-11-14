@@ -1399,7 +1399,7 @@ export function MezgebWidget({
                     e.preventDefault();
                     document.getElementById(err.fieldId)?.focus();
                   }}
-                  className="underline font-medium"
+                  className="underline font-medium !text-red-900"
                 >
                   {err.message}
                 </a>
