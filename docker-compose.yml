@@ -1,0 +1,13 @@
+# docker compose up --build   → http://localhost:3000
+# Values come from .env (copy .env.example). Leave GEMINI_API_KEY empty to run with AI off.
+services:
+  mezgeb:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - MEZGEB_SITE_KEYS=${MEZGEB_SITE_KEYS:-}
+      - MEZGEB_ALLOWED_ORIGINS=${MEZGEB_ALLOWED_ORIGINS:-}
+      - MEZGEB_TOKEN_TTL_MS=${MEZGEB_TOKEN_TTL_MS:-300000}
+    restart: unless-stopped
