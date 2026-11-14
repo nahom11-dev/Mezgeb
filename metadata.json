@@ -1,0 +1,6 @@
+{
+  "name": "Mezgeb",
+  "description": "Accessible sign-up component for training programmes, job boards, and NGOs. Built for every learner.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
