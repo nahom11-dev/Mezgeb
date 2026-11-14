@@ -8,6 +8,8 @@
 // On completion it dispatches `mezgeb:complete` with ONLY a one-time token: the platform's server swaps
 // it (plus its secret key) for the profile at POST /v1/registrations/exchange.
 //
+// TODO(audit): Remaining hackathon audit fixes 10, 11+12, 13 — checklist in /AUDIT_FIXES_TODO.md
+//
 // The widget renders inside a shadow root, so the host page's CSS (e.g. Bootstrap) and Mezgeb's CSS
 // (Tailwind) cannot affect each other.
 import React, { useEffect } from "react";
@@ -16,6 +18,7 @@ import { MezgebWidget } from "./components/MezgebWidget";
 import { LiveAnnouncerProvider } from "./components/LiveAnnouncer";
 import { I18nProvider, Lang, useI18n } from "./i18n";
 import { setApiBase } from "./lib/apiBase";
+import { attachEmbedOutboxSync } from "./lib/outboxSync";
 import {
   EMPLOYER_TEMPLATE,
   JOB_APPLICATION_TEMPLATE,
@@ -81,6 +84,8 @@ function InitialLang({ lang }: { lang: Lang }) {
 class MezgebRegister extends HTMLElement {
   static observedAttributes = ["lang", "ai", "template", "site-key", "platform-name", "api-base"];
   private root: Root | null = null;
+  private detachOutboxSync: (() => void) | null = null;
+  private outboxFlushNotice: { outboxId: string; token: string } | null = null;
 
   connectedCallback() {
     ensureDocumentProperties();
@@ -92,10 +97,25 @@ class MezgebRegister extends HTMLElement {
       shadow.appendChild(mount);
       this.root = createRoot(mount);
     }
+    const siteKey = this.getAttribute("site-key") || "";
+    this.detachOutboxSync?.();
+    this.detachOutboxSync = attachEmbedOutboxSync(siteKey, (item) => {
+      this.dispatchEvent(
+        new CustomEvent("mezgeb:complete", {
+          bubbles: true,
+          composed: true,
+          detail: { token: item.token, queued: true },
+        })
+      );
+      this.outboxFlushNotice = { outboxId: item.outboxId, token: item.token };
+      this.renderWidget();
+    });
     this.renderWidget();
   }
 
   disconnectedCallback() {
+    this.detachOutboxSync?.();
+    this.detachOutboxSync = null;
     this.root?.unmount();
     this.root = null;
     if (this.shadowRoot) this.shadowRoot.replaceChildren();
@@ -113,6 +133,7 @@ class MezgebRegister extends HTMLElement {
     const template = TEMPLATES[key] ?? LEARNING_PLATFORM_TEMPLATE;
     const platformName = this.getAttribute("platform-name") || undefined;
     const resume = new URLSearchParams(window.location.search).get("resume");
+    const outboxFlushNotice = this.outboxFlushNotice;
 
     this.root!.render(
       <I18nProvider setDocumentLang={false}>
@@ -127,6 +148,7 @@ class MezgebRegister extends HTMLElement {
             shortcutScope="widget"
             siteKey={this.getAttribute("site-key") || ""}
             persistProfile={false}
+            outboxFlushNotice={outboxFlushNotice}
             onComplete={(result) => {
               if (!result.token) return;
               this.dispatchEvent(

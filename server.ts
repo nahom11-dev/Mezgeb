@@ -52,6 +52,19 @@ const RATE_LIMIT_MAX = 30;
 
 app.use(express.json({ limit: "2mb" }));
 
+const audioPublicDir = path.resolve("public/audio");
+if (fs.existsSync(audioPublicDir)) {
+  app.use(
+    "/audio",
+    (_req, res, next) => {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      next();
+    },
+    express.static(audioPublicDir)
+  );
+}
+
 // CORS for platforms that embed <mezgeb-register> on their own pages (browser calls to /api and /v1).
 const ALLOWED_ORIGINS = (process.env.MEZGEB_ALLOWED_ORIGINS ?? "")
   .split(",")
@@ -202,7 +215,7 @@ app.post("/v1/registrations", aiRateLimit, (req, res) => {
 // Offline outbox flush: same as above, keeps the outbox id.
 app.post("/api/registrations/outbox", aiRateLimit, (req, res) => {
   const { id, profile, siteKey } = req.body ?? {};
-  const out = createRegistration(siteKey ?? DEMO_SITE_KEY, profile);
+  const out = createRegistration(siteKey, profile);
   if ("error" in out) return res.status(out.status).json({ error: out.error });
   res.json({ ok: true, outboxId: id ?? null, ...out });
 });

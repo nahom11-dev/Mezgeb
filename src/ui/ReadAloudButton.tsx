@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Volume2, VolumeX } from "lucide-react";
 
 export interface ReadAloudButtonProps {
@@ -14,35 +14,17 @@ export interface ReadAloudButtonProps {
 }
 
 /**
- * Checks whether an Amharic speech voice or pre-recorded audio exists.
- * In Amharic mode, if neither exists, the button is hidden rather than broken.
+ * Checks whether read-aloud is available, or should still show a control (Amharic fallback note).
  */
 export function useCanReadAloud(
   lang: "en" | "am",
   audioUrl?: string,
-  serverReadAloud?: boolean
+  serverReadAloud?: boolean,
+  recordedUrl?: string | null
 ): boolean {
-  const [hasAmVoice, setHasAmVoice] = useState<boolean>(() => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return false;
-    return window.speechSynthesis.getVoices().some((v) => v.lang.toLowerCase().startsWith("am"));
-  });
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    const check = () => {
-      const voices = window.speechSynthesis.getVoices();
-      setHasAmVoice(voices.some((v) => v.lang.toLowerCase().startsWith("am")));
-    };
-    check();
-    window.speechSynthesis.addEventListener?.("voiceschanged", check);
-    return () => {
-      window.speechSynthesis.removeEventListener?.("voiceschanged", check);
-    };
-  }, []);
-
-  if (audioUrl) return true;
+  if (recordedUrl || audioUrl) return true;
   if (serverReadAloud) return true;
-  if (lang === "am") return hasAmVoice;
+  if (lang === "am") return true;
   return typeof window !== "undefined" && "speechSynthesis" in window;
 }
 
@@ -56,8 +38,9 @@ export function ReadAloudButton({
   widgetSize = false,
   className = "",
   serverReadAloud,
-}: ReadAloudButtonProps & { serverReadAloud?: boolean }) {
-  const available = useCanReadAloud(lang, audioUrl, serverReadAloud);
+  recordedUrl,
+}: ReadAloudButtonProps & { serverReadAloud?: boolean; recordedUrl?: string | null }) {
+  const available = useCanReadAloud(lang, audioUrl, serverReadAloud, recordedUrl);
   if (!available) return null;
 
   const iconSize = widgetSize ? 20 : 18;

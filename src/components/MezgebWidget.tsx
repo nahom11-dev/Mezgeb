@@ -41,8 +41,14 @@ import {
   isValidGregorianDate,
 } from "../lib/ethiopianCalendar";
 import { addOutboxItem } from "../lib/outbox";
+import {
+  buildProgressSnapshot,
+  parseSavedProgress,
+  resolveResumeStep,
+} from "../lib/resumeStep";
 import { subscribePartnerSync, upsertPartnerSession } from "../lib/partnerSync";
 import { createRegistration } from "../lib/registrations";
+import { getRecordedAudioUrlFromManifest, loadAudioManifest, type AudioManifest } from "../lib/recordedAudio";
 import { saveCompletedLearnerProfile } from "../lib/profileStore";
 import { safeGetStorage, safeRemoveStorage, safeSetStorage } from "../lib/storage";
 import {
@@ -173,6 +179,8 @@ interface MezgebWidgetProps {
     queuedOffline?: boolean;
   }) => void;
   onOutboxUpdated?: () => void;
+  /** Set when embed flushes a queued registration (outbox id + token). */
+  outboxFlushNotice?: { outboxId: string; token: string } | null;
   onReset?: () => void;
   /** "widget" (embeds): Alt+H only when focus is inside the widget. */
   shortcutScope?: "window" | "widget";
@@ -259,6 +267,7 @@ export function MezgebWidget({
   onEvent,
   onComplete,
   onOutboxUpdated,
+  outboxFlushNotice = null,
   onReset,
   shortcutScope = "window",
   siteKey = "",
@@ -360,6 +369,7 @@ export function MezgebWidget({
     profile: Record<string, unknown>;
     supportShared: boolean;
     queuedOffline: boolean;
+    outboxId?: string;
   } | null>(null);
 
   // Partner sync state
@@ -372,10 +382,13 @@ export function MezgebWidget({
   >([]);
   const errorSummaryRef = useRef<HTMLDivElement>(null);
   const questionHeadingRef = useRef<HTMLHeadingElement>(null);
+  const storageHydratedRef = useRef(false);
+  const pendingResumeIndexRef = useRef<number | null>(null);
 
   // Read aloud
   const [speaking, setSpeaking] = useState(false);
   const [noAmharicVoiceNote, setNoAmharicVoiceNote] = useState(false);
+  const [audioManifest, setAudioManifest] = useState<AudioManifest | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const ttsAbortRef = useRef<AbortController | null>(null);
   const ttsUrlCacheRef = useRef(new Map<string, string>());
@@ -436,50 +449,65 @@ export function MezgebWidget({
   const [smsPhoneError, setSmsPhoneError] = useState("");
   const [smsGeneratedLink, setSmsGeneratedLink] = useState<string | null>(null);
 
+  const applySavedProgress = useCallback(
+    (parsed: ReturnType<typeof parseSavedProgress> extends infer T ? NonNullable<T> : never) => {
+      const merged: MezgebAnswers = {
+        ...createEmptyAnswers(lang, safeTemplate.partnerDefault),
+        ...(parsed.answers as MezgebAnswers),
+      };
+      const vis = safeTemplate.questions.filter((q) =>
+        isQuestionVisible(q, merged, safeTemplate.questions)
+      );
+      const idx = resolveResumeStep(parsed, vis, safeTemplate.questions);
+      setAnswers((prev) => ({ ...prev, ...(parsed.answers as MezgebAnswers) }));
+      pendingResumeIndexRef.current = idx;
+      if (idx > 0) {
+        setResumePromptStep(idx + 1);
+      }
+    },
+    [lang, safeTemplate.questions, safeTemplate.partnerDefault]
+  );
+
+  const handleResumeContinue = useCallback(() => {
+    const idx = pendingResumeIndexRef.current ?? 0;
+    setStepIndex(idx);
+    setStage("questions");
+    setResumePromptStep(null);
+    pendingResumeIndexRef.current = null;
+    const stepNum = idx + 1;
+    announce(t("widgetResumeContinued", { step: stepNum }));
+    window.setTimeout(() => {
+      questionHeadingRef.current?.focus();
+    }, 20);
+  }, [announce, t]);
+
   // Load saved state or ?resume=<id> on mount
   useEffect(() => {
-    if (readOnly || singleQuestionMode || ephemeralPreview || !effectiveSettings.offline) return;
+    if (readOnly || singleQuestionMode || ephemeralPreview || !effectiveSettings.offline) {
+      storageHydratedRef.current = true;
+      return;
+    }
     if (resumeIdParam) {
       const resumed = safeGetStorage(`mezgeb_resume_${resumeIdParam}`);
-      if (resumed.value) {
-        try {
-          const parsed = JSON.parse(resumed.value);
-          if (parsed && typeof parsed.stepIndex === "number" && parsed.answers) {
-            setAnswers((prev) => ({ ...prev, ...parsed.answers }));
-            setStepIndex(Math.min(parsed.stepIndex, totalSteps - 1));
-            setResumePromptStep(parsed.stepIndex + 1);
-            setStage("questions");
-            return;
-          }
-        } catch {
-          // ignore
-        }
-      }
+      const parsed = resumed.value ? parseSavedProgress(resumed.value) : null;
+      if (parsed) applySavedProgress(parsed);
+      storageHydratedRef.current = true;
+      return;
     }
 
     const saved = safeGetStorage(storageKey);
     if (saved.blocked) setStorageBlocked(true);
-    if (saved.value) {
-      try {
-        const parsed = JSON.parse(saved.value);
-        if (parsed && typeof parsed.stepIndex === "number" && parsed.answers) {
-          if (parsed.stepIndex > 0 && parsed.stepIndex < totalSteps) {
-            setResumePromptStep(parsed.stepIndex + 1);
-          }
-          setAnswers((prev) => ({ ...prev, ...parsed.answers }));
-        }
-      } catch {
-        // ignore
-      }
-    }
+    const parsed = saved.value ? parseSavedProgress(saved.value) : null;
+    if (parsed) applySavedProgress(parsed);
+    storageHydratedRef.current = true;
   }, [
     readOnly,
     singleQuestionMode,
     ephemeralPreview,
     storageKey,
     resumeIdParam,
-    totalSteps,
     effectiveSettings.offline,
+    applySavedProgress,
   ]);
 
   // Autosave (excluding private support fields)
@@ -490,12 +518,15 @@ export function MezgebWidget({
       singleQuestionMode ||
       ephemeralPreview ||
       completedState ||
-      !effectiveSettings.offline
+      !effectiveSettings.offline ||
+      !storageHydratedRef.current
     ) {
       return;
     }
     const sanitized = stripSupportFromAnswers(answers);
-    const res = safeSetStorage(storageKey, JSON.stringify({ stepIndex, answers: sanitized }));
+    const vis = safeTemplate.questions.filter((q) => isQuestionVisible(q, answers, safeTemplate.questions));
+    const snap = buildProgressSnapshot(stepIndex, vis, sanitized);
+    const res = safeSetStorage(storageKey, JSON.stringify(snap));
     if (res.blocked) setStorageBlocked(true);
   }, [
     answers,
@@ -562,6 +593,16 @@ export function MezgebWidget({
     });
     return unsub;
   }, [readOnly, singleQuestionMode, ephemeralPreview, partnerSessionId, announce, t]);
+
+  useEffect(() => {
+    if (!outboxFlushNotice) return;
+    setCompletedState((prev) => {
+      if (!prev?.queuedOffline) return prev;
+      if (prev.outboxId && outboxFlushNotice.outboxId !== prev.outboxId) return prev;
+      queueMicrotask(() => announce(t("widgetQueuedRegistrationSent")));
+      return { ...prev, token: outboxFlushNotice.token, queuedOffline: false };
+    });
+  }, [outboxFlushNotice, announce, t]);
 
   const currentQuestion: TemplateQuestion | null = builderCanvas
     ? builderCanvas.rawQuestion
@@ -678,8 +719,29 @@ export function MezgebWidget({
 
   const serverReadAloudForLang = Boolean(effectiveAi && capabilities.readAloudProviders?.[lang]);
 
+  useEffect(() => {
+    let active = true;
+    loadAudioManifest().then((m) => {
+      if (active && m) setAudioManifest(m);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const currentReadAloudText = currentQuestion
+    ? `${currentQuestion.label[lang]}${currentQuestion.hint?.[lang] ? `. ${currentQuestion.hint[lang]}` : ""}`
+    : t("widgetReviewTitle");
+
+  const recordedUrlForCurrent = getRecordedAudioUrlFromManifest(audioManifest, currentReadAloudText, lang);
+
   // Read aloud availability check
-  const canReadCurrent = useCanReadAloud(lang, currentQuestion?.audio?.[lang], serverReadAloudForLang);
+  const canReadCurrent = useCanReadAloud(
+    lang,
+    currentQuestion?.audio?.[lang],
+    serverReadAloudForLang,
+    recordedUrlForCurrent
+  );
 
   const playAudio = useCallback((url: string): Promise<void> => {
     const audio = new Audio(url);
@@ -727,6 +789,13 @@ export function MezgebWidget({
         return;
       }
 
+      const recorded = getRecordedAudioUrlFromManifest(audioManifest, text, targetLang);
+      if (recorded) {
+        setNoAmharicVoiceNote(false);
+        playAudio(recorded).catch(() => setSpeaking(false));
+        return;
+      }
+
       if (audioUrl) {
         playAudio(audioUrl).catch(() => setSpeaking(false));
         return;
@@ -760,7 +829,7 @@ export function MezgebWidget({
 
       speakWithBrowserVoice(text, targetLang);
     },
-    [speaking, effectiveAi, capabilities.readAloudProviders, playAudio, speakWithBrowserVoice]
+    [speaking, effectiveAi, capabilities.readAloudProviders, playAudio, speakWithBrowserVoice, audioManifest]
   );
 
   const handleReadEnglishFallback = () => {
@@ -1275,9 +1344,11 @@ export function MezgebWidget({
       });
     }
 
+    let queuedOutboxId: string | undefined;
     if (isActuallyOffline && !ephemeralPreview) {
+      queuedOutboxId = `outbox_${Date.now()}`;
       await addOutboxItem({
-        id: `outbox_${Date.now()}`,
+        id: queuedOutboxId,
         createdAt: new Date().toISOString(),
         profile,
         supportShared,
@@ -1290,7 +1361,13 @@ export function MezgebWidget({
       safeRemoveStorage(storageKey);
     }
 
-    const payload = { token, profile, supportShared, queuedOffline: isActuallyOffline };
+    const payload = {
+      token,
+      profile,
+      supportShared,
+      queuedOffline: isActuallyOffline,
+      ...(queuedOutboxId ? { outboxId: queuedOutboxId } : {}),
+    };
     onEvent?.({
       name: "registration.completed",
       timestamp: new Date().toLocaleTimeString(),
@@ -1301,7 +1378,13 @@ export function MezgebWidget({
         queued_offline: isActuallyOffline,
       },
     });
-    setCompletedState(payload);
+    setCompletedState({
+      token: payload.token,
+      profile: payload.profile,
+      supportShared: payload.supportShared,
+      queuedOffline: payload.queuedOffline,
+      ...(payload.outboxId ? { outboxId: payload.outboxId } : {}),
+    });
     announce(isActuallyOffline ? t("widgetOfflineQueuedTitle") : t("widgetSuccessTitle"));
     onComplete?.(payload);
   };
@@ -1442,6 +1525,7 @@ export function MezgebWidget({
     if (!ephemeralPreview) {
       safeRemoveStorage(storageKey);
     }
+    pendingResumeIndexRef.current = null;
     setCompletedState(null);
     setStepIndex(0);
     setStage(useIntroScreens ? "welcome" : "questions");
@@ -1469,7 +1553,11 @@ export function MezgebWidget({
       phone: normalizePhoneDigits(candidatePhone),
     });
     if (!ephemeralPreview) {
-      safeSetStorage(`mezgeb_resume_${resumeId}`, JSON.stringify({ stepIndex, answers: sanitized }));
+      const vis = safeTemplate.questions.filter((q) =>
+        isQuestionVisible(q, answers, safeTemplate.questions)
+      );
+      const snap = buildProgressSnapshot(stepIndex, vis, sanitized);
+      safeSetStorage(`mezgeb_resume_${resumeId}`, JSON.stringify(snap));
     }
     setSmsGeneratedLink(`${window.location.origin}/demo?resume=${resumeId}`);
   };
@@ -1484,21 +1572,12 @@ export function MezgebWidget({
       return;
     }
     const stored = safeGetStorage(`mezgeb_resume_${id}`).value;
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        if (parsed && typeof parsed.stepIndex === "number" && parsed.answers) {
-          setAnswers((prev) => ({ ...prev, ...parsed.answers }));
-          setStepIndex(Math.min(parsed.stepIndex, totalSteps - 1));
-          setResumePromptStep(parsed.stepIndex + 1);
-          setResumeError("");
-          setResumeLinkInputOpen(false);
-          setStage("questions");
-          return;
-        }
-      } catch {
-        // ignore
-      }
+    const parsed = stored ? parseSavedProgress(stored) : null;
+    if (parsed) {
+      applySavedProgress(parsed);
+      setResumeError("");
+      setResumeLinkInputOpen(false);
+      return;
     }
     setResumeError("");
     setResumeLinkInputOpen(false);
@@ -1937,7 +2016,7 @@ export function MezgebWidget({
             variant="info"
             action={
               <div className="flex items-center gap-2">
-                <Button variant="secondary" size="md" onClick={() => setResumePromptStep(null)}>
+                <Button variant="secondary" size="md" onClick={handleResumeContinue}>
                   {t("widgetResumeBtn", { step: resumePromptStep })}
                 </Button>
                 <Button variant="quiet" size="md" onClick={handleRestart}>
@@ -2206,6 +2285,7 @@ export function MezgebWidget({
                 text={primaryLabel}
                 lang={lang}
                 audioUrl={currentQuestion?.audio?.[lang]}
+                recordedUrl={recordedUrlForCurrent}
                 serverReadAloud={serverReadAloudForLang}
                 speaking={speaking}
                 label={builderCanvas ? builderCanvas.labels.readAloudLabel : t("widgetReadAloud")}
@@ -2306,6 +2386,7 @@ export function MezgebWidget({
                 <ReadAloudButton
                   text={prewrittenHelp}
                   lang={lang}
+                  recordedUrl={getRecordedAudioUrlFromManifest(audioManifest, prewrittenHelp, lang)}
                   serverReadAloud={serverReadAloudForLang}
                   speaking={speaking}
                   label={t("widgetReadAloud")}
