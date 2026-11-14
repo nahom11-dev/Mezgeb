@@ -2664,14 +2664,31 @@ export function MezgebWidget({
                 } else if (q.type === "phone") {
                   displayVal = answers[q.id] ? formatPhoneGrouped(String(answers[q.id])) : "—";
                 } else if (q.type === "id-routes") {
-                  displayVal = answers.id_route
-                    ? answers.id_route === "partner_refer"
-                      ? `${t("heroOptPartner")} (partner_pending)`
-                      : String(answers.id_route)
-                    : "—";
+                  const routeLabel: Record<string, string> = {
+                    fayda: t("heroOptFayda"),
+                    refugee_id: t("heroOptRefugee"),
+                    other_document: t("heroOptOther"),
+                    partner_refer: t("heroOptPartner"),
+                  };
+                  const orgLabel: Record<string, string> = {
+                    addis_accessibility: t("widgetPartner1"),
+                    refugee_support_desk: t("widgetPartner2"),
+                    community_tvet: t("widgetPartner3"),
+                  };
+                  const route = String(answers.id_route ?? "");
+                  displayVal = !route
+                    ? "—"
+                    : route === "partner_refer"
+                      ? [routeLabel.partner_refer, orgLabel[String(answers.partner_org ?? "")], t("widgetPartnerPendingLabel")]
+                          .filter(Boolean)
+                          .join(" — ")
+                      : routeLabel[route] ?? route;
                 } else if (q.type === "support") {
                   const list = Array.isArray(answers.support_needs) ? answers.support_needs : [];
-                  displayVal = list.length > 0 ? list.join(", ") : "—";
+                  displayVal =
+                    list.length > 0
+                      ? list.map((v) => q.options?.find((o) => o.value === v)?.label[lang] ?? v).join(", ")
+                      : "—";
                 } else if (q.type === "work-story") {
                   const list = Array.isArray(answers.skills) ? answers.skills : [];
                   displayVal = list.length > 0 ? list.join(", ") : String(answers.work_story || "—");
