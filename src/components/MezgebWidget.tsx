@@ -96,6 +96,15 @@ function formatPhoneGrouped(raw: string): string {
   return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
 }
 
+function isDigitType(type: string): boolean {
+  return type === "phone" || type === "number";
+}
+
+/** "0911223344" -> "0 9 1 1 2 2 3 3 4 4" so it is read back one digit at a time. */
+function spellDigits(raw: string): string {
+  return raw.replace(/\D/g, "").split("").join(" ");
+}
+
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -650,6 +659,7 @@ export function MezgebWidget({
                   matchedLabel: matchedOpt.label,
                   isMulti,
                 });
+                announce(t("widgetVoiceChoiceConfirm", { option: matchedOpt.label }));
               } else {
                 setVoiceMessage(t("widgetVoiceChoiceNoMatch"));
               }
@@ -663,6 +673,9 @@ export function MezgebWidget({
               value: result.value,
               confidence: result.confidence,
             });
+            // Read back what was heard; numbers digit by digit (speech recognition often gets them wrong)
+            const heard = isDigitType(expectedType) ? spellDigits(result.value) : result.value || result.transcript;
+            announce(`${t("widgetTranscriptConfirmTitle")} ${heard}`);
           }
         } catch {
           setVoiceMessage(t("widgetVoiceTimeout"));
@@ -1653,6 +1666,11 @@ export function MezgebWidget({
                     >
                       {t("widgetTranscriptConfirmTitle")}
                     </label>
+                    {isDigitType(currentQuestion.type) && (
+                      <p className="font-mono text-lg tracking-widest text-[#111111]">
+                        {spellDigits(pendingTranscript.value)}
+                      </p>
+                    )}
                     <input
                       id={`${widgetId}-transcript-edit`}
                       type="text"
