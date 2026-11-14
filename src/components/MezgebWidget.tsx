@@ -1178,6 +1178,12 @@ export function MezgebWidget({
 
   const progressPct = Math.round(((stepIndex + 1) / totalSteps) * 100);
   const currentErrorMap = new Map(errors.map((e) => [e.fieldId, e.message]));
+  const hintDomId = currentQuestion?.hint?.[lang] ? `${getFieldDomId(currentQuestion.id)}-hint` : undefined;
+  /** aria-describedby for a field: the question hint (always) plus its error message (when shown). */
+  const describedBy = (fieldKey: string): string | undefined => {
+    const ids = [hintDomId, currentErrorMap.has(getFieldDomId(fieldKey)) ? `${getFieldDomId(fieldKey)}-err` : undefined].filter(Boolean);
+    return ids.length ? ids.join(" ") : undefined;
+  };
 
   // Date validation & live equivalent display ONLY when valid complete date is entered (A3, B8)
   const ethBounds = getAllowedYearBounds("eth");
@@ -1578,7 +1584,7 @@ export function MezgebWidget({
                   <p lang={secondaryLang} className="text-sm text-[#6B6B6B]">{secondaryLabel}</p>
                 )}
                 {currentQuestion.hint?.[lang] && (
-                  <p className="text-sm text-[#6B6B6B] pt-1">{currentQuestion.hint[lang]}</p>
+                  <p id={hintDomId} className="text-sm text-[#6B6B6B] pt-1">{currentQuestion.hint[lang]}</p>
                 )}
               </div>
             </div>
@@ -1721,11 +1727,7 @@ export function MezgebWidget({
                 value={String(answers[currentQuestion.id] ?? "")}
                 onChange={(e) => updateAnswer(currentQuestion.id, e.target.value)}
                 aria-invalid={currentErrorMap.has(getFieldDomId(currentQuestion.id))}
-                aria-describedby={
-                  currentErrorMap.has(getFieldDomId(currentQuestion.id))
-                    ? `${getFieldDomId(currentQuestion.id)}-err`
-                    : undefined
-                }
+                aria-describedby={describedBy(currentQuestion.id)}
                 className="w-full min-h-[46px] px-4 rounded-xl border border-[#E7E7E4] text-base text-[#111111] bg-white"
               />
               {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
@@ -1753,11 +1755,7 @@ export function MezgebWidget({
                 value={String(answers[currentQuestion.id] ?? "")}
                 onChange={(e) => updateAnswer(currentQuestion.id, e.target.value)}
                 aria-invalid={currentErrorMap.has(getFieldDomId(currentQuestion.id))}
-                aria-describedby={
-                  currentErrorMap.has(getFieldDomId(currentQuestion.id))
-                    ? `${getFieldDomId(currentQuestion.id)}-err`
-                    : undefined
-                }
+                aria-describedby={describedBy(currentQuestion.id)}
                 className="w-full min-h-[46px] px-4 rounded-xl border border-[#E7E7E4] text-base text-[#111111] bg-white"
               />
               {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
@@ -1786,11 +1784,7 @@ export function MezgebWidget({
                 value={String(answers[currentQuestion.id] ?? "")}
                 onChange={(e) => updateAnswer(currentQuestion.id, e.target.value.replace(/[^\d.-]/g, ""))}
                 aria-invalid={currentErrorMap.has(getFieldDomId(currentQuestion.id))}
-                aria-describedby={
-                  currentErrorMap.has(getFieldDomId(currentQuestion.id))
-                    ? `${getFieldDomId(currentQuestion.id)}-err`
-                    : undefined
-                }
+                aria-describedby={describedBy(currentQuestion.id)}
                 className="w-full min-h-[46px] px-4 rounded-xl border border-[#E7E7E4] text-base font-mono text-[#111111] bg-white"
               />
               {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
@@ -1859,7 +1853,7 @@ export function MezgebWidget({
                 })}
               </div>
               {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                <p className="mt-2 text-sm text-red-700 font-medium">
+                <p id={`${getFieldDomId(currentQuestion.id)}-err`} className="mt-2 text-sm text-red-700 font-medium">
                   {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
                 </p>
               )}
@@ -1891,7 +1885,7 @@ export function MezgebWidget({
                 </span>
               </label>
               {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                <p className="mt-2 text-sm text-red-700 font-medium">
+                <p id={`${getFieldDomId(currentQuestion.id)}-err`} className="mt-2 text-sm text-red-700 font-medium">
                   {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
                 </p>
               )}
@@ -1916,11 +1910,7 @@ export function MezgebWidget({
                 value={formatPhoneGrouped(String(answers[currentQuestion.id] ?? ""))}
                 onChange={(e) => updateAnswer(currentQuestion.id, normalizePhoneDigits(e.target.value))}
                 aria-invalid={currentErrorMap.has(getFieldDomId(currentQuestion.id))}
-                aria-describedby={
-                  currentErrorMap.has(getFieldDomId(currentQuestion.id))
-                    ? `${getFieldDomId(currentQuestion.id)}-err`
-                    : undefined
-                }
+                aria-describedby={describedBy(currentQuestion.id)}
                 className="w-full min-h-[46px] px-4 rounded-xl border border-[#E7E7E4] text-base font-mono tracking-wide text-[#111111] bg-white"
               />
               {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
@@ -1970,6 +1960,7 @@ export function MezgebWidget({
                       </label>
                       <input
                         id={getFieldDomId("dob_eth_day")}
+                        aria-describedby={describedBy("dob_eth_day")}
                         type="text"
                         inputMode="numeric"
                         pattern="[0-9]*"
@@ -1987,6 +1978,7 @@ export function MezgebWidget({
                       </label>
                       <select
                         id={getFieldDomId("dob_eth_month")}
+                        aria-describedby={describedBy("dob_eth_month")}
                         disabled={readOnly}
                         value={String(answers.dob_eth_month ?? "")}
                         onChange={(e) => updateAnswer("dob_eth_month", e.target.value)}
@@ -2006,6 +1998,7 @@ export function MezgebWidget({
                       </label>
                       <input
                         id={getFieldDomId("dob_eth_year")}
+                        aria-describedby={describedBy("dob_eth_year")}
                         type="text"
                         inputMode="numeric"
                         pattern="[0-9]*"
@@ -2028,7 +2021,7 @@ export function MezgebWidget({
                     </p>
                   )}
                   {currentErrorMap.has(getFieldDomId("dob_eth_year")) && (
-                    <p className="text-sm text-red-700 font-medium">
+                    <p id={`${getFieldDomId("dob_eth_year")}-err`} className="text-sm text-red-700 font-medium">
                       {currentErrorMap.get(getFieldDomId("dob_eth_year"))}
                     </p>
                   )}
@@ -2042,6 +2035,7 @@ export function MezgebWidget({
                       </label>
                       <input
                         id={getFieldDomId("dob_greg_day")}
+                        aria-describedby={describedBy("dob_greg_day")}
                         type="text"
                         inputMode="numeric"
                         pattern="[0-9]*"
@@ -2059,6 +2053,7 @@ export function MezgebWidget({
                       </label>
                       <select
                         id={getFieldDomId("dob_greg_month")}
+                        aria-describedby={describedBy("dob_greg_month")}
                         disabled={readOnly}
                         value={String(answers.dob_greg_month ?? "")}
                         onChange={(e) => updateAnswer("dob_greg_month", e.target.value)}
@@ -2078,6 +2073,7 @@ export function MezgebWidget({
                       </label>
                       <input
                         id={getFieldDomId("dob_greg_year")}
+                        aria-describedby={describedBy("dob_greg_year")}
                         type="text"
                         inputMode="numeric"
                         pattern="[0-9]*"
@@ -2100,7 +2096,7 @@ export function MezgebWidget({
                     </p>
                   )}
                   {currentErrorMap.has(getFieldDomId("dob_greg_year")) && (
-                    <p className="text-sm text-red-700 font-medium">
+                    <p id={`${getFieldDomId("dob_greg_year")}-err`} className="text-sm text-red-700 font-medium">
                       {currentErrorMap.get(getFieldDomId("dob_greg_year"))}
                     </p>
                   )}
@@ -2113,7 +2109,7 @@ export function MezgebWidget({
           {currentQuestion.type === "choice" && currentQuestion.options && (
             <div className="space-y-3">
               {renderSpeakChoiceButton(currentQuestion, false)}
-              <fieldset>
+              <fieldset aria-describedby={describedBy(currentQuestion.id)}>
                 <legend className="sr-only">{primaryLabel}</legend>
                 <div
                   id={getFieldDomId(currentQuestion.id)}
@@ -2157,7 +2153,7 @@ export function MezgebWidget({
                   })}
                 </div>
                 {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                  <p className="mt-2 text-sm text-red-700 font-medium">
+                  <p id={`${getFieldDomId(currentQuestion.id)}-err`} className="mt-2 text-sm text-red-700 font-medium">
                     {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
                   </p>
                 )}
@@ -2169,7 +2165,7 @@ export function MezgebWidget({
           {currentQuestion.type === "multichoice" && currentQuestion.options && (
             <div className="space-y-3">
               {renderSpeakChoiceButton(currentQuestion, true)}
-              <fieldset>
+              <fieldset aria-describedby={describedBy(currentQuestion.id)}>
                 <legend className="sr-only">{primaryLabel}</legend>
                 <div className="flex flex-wrap gap-2.5" id={getFieldDomId(currentQuestion.id)}>
                   {currentQuestion.options.map((opt) => {
@@ -2203,7 +2199,7 @@ export function MezgebWidget({
                   })}
                 </div>
                 {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                  <p className="mt-2 text-sm text-red-700 font-medium">
+                  <p id={`${getFieldDomId(currentQuestion.id)}-err`} className="mt-2 text-sm text-red-700 font-medium">
                     {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
                   </p>
                 )}
@@ -2233,7 +2229,7 @@ export function MezgebWidget({
                 false
               )}
 
-              <fieldset>
+              <fieldset aria-describedby={describedBy(currentQuestion.id)}>
                 <legend className="sr-only">{primaryLabel}</legend>
                 <div id={getFieldDomId(currentQuestion.id)} className="grid grid-cols-1 gap-2.5">
                   {(
@@ -2305,6 +2301,7 @@ export function MezgebWidget({
                       type="checkbox"
                       disabled={readOnly}
                       checked={Boolean(answers.partner_consent)}
+                      aria-describedby={currentErrorMap.has(getFieldDomId("partner_consent")) ? `${getFieldDomId("partner_consent")}-err` : undefined}
                       onChange={(e) => updateAnswer("partner_consent", e.target.checked)}
                       className="mt-1 w-4 h-4 accent-[#6A4FC4]"
                     />
@@ -2318,12 +2315,12 @@ export function MezgebWidget({
               )}
 
               {currentErrorMap.has(getFieldDomId(currentQuestion.id)) && (
-                <p className="text-sm text-red-700 font-medium">
+                <p id={`${getFieldDomId(currentQuestion.id)}-err`} className="text-sm text-red-700 font-medium">
                   {currentErrorMap.get(getFieldDomId(currentQuestion.id))}
                 </p>
               )}
               {currentErrorMap.has(getFieldDomId("partner_consent")) && (
-                <p className="text-sm text-red-700 font-medium">
+                <p id={`${getFieldDomId("partner_consent")}-err`} className="text-sm text-red-700 font-medium">
                   {currentErrorMap.get(getFieldDomId("partner_consent"))}
                 </p>
               )}
@@ -2436,6 +2433,7 @@ export function MezgebWidget({
                   disabled={readOnly}
                   value={String(answers.work_story ?? "")}
                   onChange={(e) => updateAnswer("work_story", e.target.value)}
+                  aria-describedby={describedBy(currentQuestion.id)}
                   className="w-full p-4 rounded-xl border border-[#E7E7E4] text-base text-[#111111] bg-white"
                 />
               </div>
