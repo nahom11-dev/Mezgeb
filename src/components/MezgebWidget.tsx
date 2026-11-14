@@ -1343,6 +1343,8 @@ export function MezgebWidget({
           <div
             className="w-full h-1.5 bg-[#E7E7E4] rounded-full overflow-hidden"
             role="progressbar"
+            aria-label={t("widgetStepOf", { current: stepIndex + 1, total: totalSteps })}
+            aria-valuetext={t("widgetStepOf", { current: stepIndex + 1, total: totalSteps })}
             aria-valuenow={stepIndex + 1}
             aria-valuemin={1}
             aria-valuemax={totalSteps}
