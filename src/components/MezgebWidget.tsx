@@ -1200,7 +1200,7 @@ export function MezgebWidget({
 
         {!completedState.queuedOffline && (
           <div className="p-4 rounded-xl bg-[#F5F5F3] border border-[#E7E7E4] text-sm">
-            <p className="text-[#6B6B6B] mb-1">{t("widgetSuccessTokenNote")}</p>
+            <p className="text-[#6B6B6B] mb-1">{t("widgetSuccessTokenNote", { platform: effectivePlatformName })}</p>
             <code className="font-mono !text-[#111111] font-medium break-all">{completedState.token}</code>
           </div>
         )}

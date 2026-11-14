@@ -400,7 +400,7 @@ const en = {
   widgetSuccessTitle: "You're registered",
   widgetSuccessBody:
     "Your account profile has been confirmed. If you were offline, it is queued to send automatically on reconnection.",
-  widgetSuccessTokenNote: "One-time token issued to learnhub.et:",
+  widgetSuccessTokenNote: "One-time token issued to {platform}:",
   widgetSuccessRestart: "Register another learner (sample)",
 
   // Validation errors & pre-written help per error code and question type
@@ -1353,7 +1353,7 @@ const am: typeof en = {
   widgetSuccessTitle: "ተመዝግበዋል",
   widgetSuccessBody:
     "የመለያ መገለጫዎ ተረጋግጧል። ኢንተርኔት ካልነበረ፣ እንደተገናኙ በራስ-ሰር ይላካል።",
-  widgetSuccessTokenNote: "ለ learnhub.et የተሰጠ አንድ-ጊዜ ቶከን፦",
+  widgetSuccessTokenNote: "ለ {platform} የተሰጠ አንድ-ጊዜ ቶከን፦",
   widgetSuccessRestart: "ሌላ ተማሪ መዝግብ (ናሙና)",
 
   // Validation errors & pre-written help
