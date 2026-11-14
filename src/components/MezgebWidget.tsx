@@ -48,6 +48,7 @@ import {
   VolumeIcon,
 } from "./Icons";
 import { useLiveAnnouncer } from "./LiveAnnouncer";
+import { withLang } from "../lib/langRuns";
 
 export interface MezgebAnswers {
   [key: string]: unknown;
@@ -1080,7 +1081,7 @@ export function MezgebWidget({
 
   if (!validation.valid && safeTemplate.questions.length === 0) {
     return (
-      <div role="alert" className="mezgeb-card p-6 border-red-300 bg-red-50 text-red-900 space-y-2">
+      <div lang={lang} role="alert" className="mezgeb-card p-6 border-red-300 bg-red-50 text-red-900 space-y-2">
         <p className="font-semibold">{t("templatesValidationErrorsTitle")}</p>
         <ul className="list-disc pl-5 text-sm">
           {validation.errors.map((err, i) => (
@@ -1094,7 +1095,7 @@ export function MezgebWidget({
   // C6: "What happens next" screen after confirm, before final token/success details
   if (nextScreenState) {
     return (
-      <div className="mezgeb-card p-6 md:p-8 space-y-6">
+      <div lang={lang} className="mezgeb-card p-6 md:p-8 space-y-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-4">
             <div className="w-11 h-11 rounded-full bg-[#E4F2EC] text-[#1F5C46] flex items-center justify-center shrink-0">
@@ -1135,7 +1136,7 @@ export function MezgebWidget({
 
   if (completedState) {
     return (
-      <div className="mezgeb-card p-6 md:p-8 space-y-6">
+      <div lang={lang} className="mezgeb-card p-6 md:p-8 space-y-6">
         <div className="flex items-start gap-4">
           <div className="w-11 h-11 rounded-full bg-[#E4F2EC] text-[#1F5C46] flex items-center justify-center shrink-0">
             <CheckIcon size={22} />
@@ -1266,7 +1267,7 @@ export function MezgebWidget({
   };
 
   return (
-    <div className="mezgeb-card p-5 sm:p-7 md:p-8 space-y-6">
+    <div lang={lang} className="mezgeb-card p-5 sm:p-7 md:p-8 space-y-6">
       {/* Offline banner */}
       {offline && (
         <div role="status" className="p-3.5 rounded-xl bg-[#F9F3EA] border border-[#E7E7E4] text-sm text-[#111111]">
@@ -1561,7 +1562,7 @@ export function MezgebWidget({
                   {primaryLabel}
                 </h2>
                 {secondaryLabel && secondaryLabel !== primaryLabel && (
-                  <p className="text-sm text-[#6B6B6B]">{secondaryLabel}</p>
+                  <p lang={secondaryLang} className="text-sm text-[#6B6B6B]">{secondaryLabel}</p>
                 )}
                 {currentQuestion.hint?.[lang] && (
                   <p className="text-sm text-[#6B6B6B] pt-1">{currentQuestion.hint[lang]}</p>
@@ -1834,7 +1835,7 @@ export function MezgebWidget({
                       }`}
                     >
                       {selected && <CheckIcon size={16} />}
-                      <span>{opt.label}</span>
+                      <span>{withLang(opt.label, lang)}</span>
                     </button>
                   );
                 })}
@@ -2130,7 +2131,7 @@ export function MezgebWidget({
                             style={{ accentColor: effectiveAccent }}
                             className="w-4 h-4"
                           />
-                          <span className="text-base font-medium">{opt.label[lang]}</span>
+                          <span className="text-base font-medium">{withLang(opt.label[lang], lang)}</span>
                         </div>
                         {selected && <CheckIcon size={16} className="shrink-0" />}
                       </label>
@@ -2178,7 +2179,7 @@ export function MezgebWidget({
                         }`}
                       >
                         {selected && <CheckIcon size={15} />}
-                        <span>{opt.label[lang]}</span>
+                        <span>{withLang(opt.label[lang], lang)}</span>
                       </button>
                     );
                   })}
@@ -2249,7 +2250,7 @@ export function MezgebWidget({
                               style={{ accentColor: effectiveAccent }}
                               className="w-4 h-4"
                             />
-                            <span className="text-base font-medium">{opt.label}</span>
+                            <span className="text-base font-medium">{withLang(opt.label, lang)}</span>
                           </div>
                         </label>
                       );
@@ -2348,7 +2349,7 @@ export function MezgebWidget({
                       }`}
                     >
                       {selected && <CheckIcon size={15} className="text-[#6A4FC4]" />}
-                      <span>{opt.label[lang]}</span>
+                      <span>{withLang(opt.label[lang], lang)}</span>
                     </button>
                   );
                 })}
@@ -2653,7 +2654,7 @@ export function MezgebWidget({
                 return (
                   <div key={q.id} className="py-3.5 grid grid-cols-[1fr_auto] gap-x-4 items-start">
                     <dt className="col-start-1 text-xs font-medium text-[#6B6B6B]">{q.label[lang]}</dt>
-                    <dd className="col-start-1 text-sm font-medium text-[#111111] mt-0.5">{displayVal}</dd>
+                    <dd className="col-start-1 text-sm font-medium text-[#111111] mt-0.5">{withLang(displayVal, lang)}</dd>
                     <dd className="col-start-2 row-start-1 row-span-2 self-start">
                       <button
                         type="button"
