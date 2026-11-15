@@ -895,6 +895,7 @@ export function MezgebWidget({
     speakText,
   ]);
 
+
   // Help panel Escape & focus management
   useEffect(() => {
     if (!helpOpen) return;
@@ -1114,6 +1115,38 @@ export function MezgebWidget({
       textInputRef.current?.focus();
     }
   };
+
+  // Speak mode: sound and recorder stay active / listening automatically
+  const lastSpeakAutoKeyRef = useRef<string>("");
+  useEffect(() => {
+    if (
+      stage !== "questions" ||
+      answerMode !== "speak" ||
+      !currentQuestion ||
+      currentQuestion.type === "info" ||
+      readOnly
+    ) {
+      return;
+    }
+    const key = `speak-${stepIndex}-${currentQuestion.id}-${lang}`;
+    if (lastSpeakAutoKeyRef.current === key) return;
+    lastSpeakAutoKeyRef.current = key;
+
+    const textToRead = currentQuestion.hint?.[lang] || currentQuestion.label[lang];
+    if (textToRead && !speaking) {
+      speakText(textToRead, lang, currentQuestion.audio?.[lang]);
+    }
+
+    const timer = window.setTimeout(() => {
+      if (canVoice && currentQuestion.allowVoice !== false && voiceUiState === "idle") {
+        const opts = currentQuestion.options?.map((o) => ({ value: o.value, label: o.label[lang] }));
+        const isMulti = currentQuestion.type === "multichoice";
+        startVoiceRecording(currentQuestion.id, currentQuestion.label[lang], currentQuestion.type, opts, isMulti);
+      }
+    }, 1500);
+
+    return () => window.clearTimeout(timer);
+  }, [stage, answerMode, currentQuestion, lang, readOnly, stepIndex, speaking, speakText, canVoice, voiceUiState, startVoiceRecording]);
 
   const validateCurrentStep = (): {
     fieldId: string;

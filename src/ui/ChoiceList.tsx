@@ -55,9 +55,13 @@ export function ChoiceList({
         {options.map((opt) => {
           const selected = isSelected(opt.value);
           return (
-            <label
+            <div
               key={opt.value}
               lang={opt.lang}
+              onClick={(e) => {
+                e.preventDefault();
+                toggle(opt.value);
+              }}
               className={`mezgeb-transition flex items-center justify-between gap-3 min-h-[56px] px-4 py-3 rounded-[10px] cursor-pointer text-left ${
                 selected
                   ? "border-2 border-[var(--accent)] bg-[var(--lilac)] text-[var(--ink)]"
@@ -70,7 +74,7 @@ export function ChoiceList({
                 value={opt.value}
                 checked={selected}
                 disabled={disabled}
-                onChange={() => toggle(opt.value)}
+                onChange={() => {}}
                 className="sr-only"
               />
               <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -100,7 +104,7 @@ export function ChoiceList({
               >
                 {selected && <Check size={16} strokeWidth={2} />}
               </span>
-            </label>
+            </div>
           );
         })}
       </div>
